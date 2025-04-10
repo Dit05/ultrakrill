@@ -1,0 +1,9 @@
+profiles:
+  uno:
+    fqbn: arduino:avr:uno
+    platforms:
+      - platform: arduino:avr (1.8.6)
+    libraries:
+      - LiquidCrystal (1.0.7)
+
+default_profile: uno
