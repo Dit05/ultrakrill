@@ -10,7 +10,9 @@
 
 // Konfigurációs DEFINEok
 #define CONF_DEBUG_LOGGING 1
+
 #define CONF_PANIC_BOUNDS 1
+#define CONF_PANIC_LAG 0
 
 
 // Pinek
@@ -70,6 +72,7 @@ DEBUG_PRINTLN(val);
 
 
 const int PANIC_FRAME_INDEX_OUT_OF_RANGE = 1;
+const int PANIC_LAG = 2;
 
 
 // Végtelen ciklusban villogja le a megadott `code`-ot.
@@ -167,6 +170,33 @@ namespace fire {
 
 namespace gfx {
 
+    namespace sprites {
+
+        const byte WALL[CHAR_HEIGHT] = {
+            0b11111,
+            0b10001,
+            0b10001,
+            0b10001,
+            0b10001,
+            0b10001,
+            0b10001,
+            0b11111
+        };
+
+        const byte WALL_CRACKED[CHAR_HEIGHT] = {
+            0b00111,
+            0b11010,
+            0b10010,
+            0b10101,
+            0b10001,
+            0b11010,
+            0b10001,
+            0b01111
+        };
+
+    }
+
+
     class Frame {
 
     public:
@@ -232,6 +262,16 @@ namespace gfx {
 
     };
 
+
+    const byte CHAR_FIRE = 0; // Procedural fire
+    const byte CHAR_PLAYER = 1; // Animated player character
+    const byte CHAR_WALL = 2; // Pristine wall
+    const byte CHAR_WALL_CRACKED = 3; // Damaged wall
+    const byte CHAR_HEALTH = 4; // Procedural health bar
+    const byte CHAR_FILTH = 5; // Animated character for the ground enemy.
+    const byte CHAR_IMP = 6; // Animated character for the flying-shooting enemy.
+    const byte CHAR_UNUSED7 = 7;
+
 }
 
 
@@ -240,6 +280,20 @@ gfx::Frame frontBuffer;
 gfx::Frame backBuffer;
 gfx::Frame* frontPtr = &frontBuffer;
 gfx::Frame* backPtr = &backBuffer;
+
+// Ezt töltögetjük majd fel annyira, hogy az életerőt mutassa.
+byte healthChar[CHAR_HEIGHT] = {
+    0b00000,
+    0b00000,
+    0b00000,
+    0b00000,
+    0b00000,
+    0b00000,
+    0b00000,
+    0b00000
+};
+
+bool lagging = false; // Időtúllépéses-e az előző frame.
 
 
 void setup() {
@@ -281,26 +335,36 @@ void loop() {
     fire::compose(fire);
     lcd.createChar(0, fire);
 
+
     // Demo: ' ' -> *, * -> (tűz).
-    byte* ch = frontPtr->index(random(LCD_WIDTH), random(LCD_HEIGHT));
-    if(*ch != '*') {
-        *ch = '*';
-    } else {
-        *ch = 0;
+    while(random(3) != 0) {
+        byte* ch = frontPtr->index(random(LCD_WIDTH), random(LCD_HEIGHT));
+        if(*ch != '*') {
+            *ch = '*';
+        } else {
+            *ch = 0;
+        }
     }
 
-    frontPtr->presentDifferential(&lcd, backPtr);
+    if(up) delay(MILLIS_PER_FRAME); // Lag gomb
 
-    *backPtr = *frontPtr; // Átmásolás (mert nem töltjük ki a teljes front buffert)
 
-    // Swap
-    gfx::Frame* tmp = frontPtr;
-    frontPtr = backPtr;
-    backPtr = tmp;
+    // Ha időhiányban szenvedünk, akkor átugorjuk a kirajzolást, mert ez jelentős időbe telik, és "nem hat" a játékmenetre.
+    if(!lagging) {
+        frontPtr->presentDifferential(&lcd, backPtr);
+
+        *backPtr = *frontPtr; // Átmásolás (mert nem töltjük ki a teljes front buffert)
+
+        // Swap
+        gfx::Frame* tmp = frontPtr;
+        frontPtr = backPtr;
+        backPtr = tmp;
+    }
 
     // Kitaláljuk, mennyit kell várni a következő frame elejéig
     unsigned long now = millis();
-    if(now < nextFrameDue) {
+    lagging = now > nextFrameDue;
+    if(!lagging) {
         unsigned long slack = nextFrameDue - now;
 
         digitalWrite(LED_BUILTIN, HIGH);
@@ -310,6 +374,10 @@ void loop() {
         DEBUG_LOG_CAPTIONED("Slack: ", slack);
     } else {
         DEBUG_LOG_CAPTIONED("Lag: ", now - nextFrameDue);
+
+#if CONF_PANIC_LAG
+        panic(PANIC_LAG, "We are lagging :(");
+#endif
     }
     nextFrameDue += MILLIS_PER_FRAME;
 }
