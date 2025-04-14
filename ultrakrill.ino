@@ -184,15 +184,116 @@ namespace gfx {
         };
 
         const byte WALL_CRACKED[CHAR_HEIGHT] = {
-            0b00111,
-            0b11010,
-            0b10010,
+            0b01101,
+            0b10110,
+            0b01010,
             0b10101,
-            0b10001,
+            0b01001,
             0b11010,
             0b10001,
-            0b01111
+            0b11110
         };
+
+        const byte PLAYER_WALK1[CHAR_HEIGHT] = {
+            0b00000,
+            0b00110,
+            0b01000,
+            0b10110,
+            0b11011,
+            0b11100,
+            0b01111,
+            0b01000
+        };
+
+        const byte PLAYER_WALK2[CHAR_HEIGHT] = {
+            0b00110,
+            0b01000,
+            0b10110,
+            0b11100,
+            0b11011,
+            0b01100,
+            0b11010,
+            0b00010
+        };
+
+        const byte PLAYER_SLIDE[CHAR_HEIGHT] = {
+            0b00000,
+            0b00000,
+            0b01100,
+            0b10000,
+            0b01100,
+            0b11011,
+            0b11100,
+            0b01011
+        };
+
+        const byte FILTH1[CHAR_HEIGHT] = {
+            0b00000,
+            0b10101,
+            0b11011,
+            0b01110,
+            0b11011,
+            0b11110,
+            0b01010,
+            0b00010
+        };
+
+        const byte FILTH2[CHAR_HEIGHT] = {
+            0b00000,
+            0b01110,
+            0b11011,
+            0b01010,
+            0b11111,
+            0b01111,
+            0b01010,
+            0b01000
+        };
+
+        const byte IMP1[CHAR_HEIGHT] = {
+            0b00000,
+            0b00110,
+            0b01110,
+            0b01011,
+            0b11111,
+            0b00011,
+            0b01110,
+            0b00000
+        };
+
+        const byte IMP2[CHAR_HEIGHT] = {
+            0b00000,
+            0b00000,
+            0b00110,
+            0b01111,
+            0b01011,
+            0b11111,
+            0b01110,
+            0b00000
+        };
+
+        const byte IMP_FIRE[CHAR_HEIGHT] = {
+            0b00110,
+            0b01001,
+            0b11111,
+            0b00011,
+            0b11000,
+            0b11001,
+            0b00010,
+            0b01100
+        };
+
+        /*
+        const byte TEMPLATE[CHAR_HEIGHT] = {
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000
+        };
+        */
 
     }
 
