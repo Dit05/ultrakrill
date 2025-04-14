@@ -60,9 +60,9 @@ void setup() {
 
     pinMode(LED_BUILTIN, OUTPUT);
 
-    pinMode(PIN_BUTTON_UP, INPUT);
-    pinMode(PIN_BUTTON_DOWN, INPUT);
-    pinMode(PIN_BUTTON_RIGHT, INPUT);
+    pinMode(PIN_BUTTON_UP, INPUT_PULLUP);
+    pinMode(PIN_BUTTON_DOWN, INPUT_PULLUP);
+    pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
 
     pinMode(PIN_LCD_RS, OUTPUT);
     pinMode(PIN_LCD_E, OUTPUT);
