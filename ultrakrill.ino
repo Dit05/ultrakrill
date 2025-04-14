@@ -4,6 +4,11 @@
 // - A konstansokat (ÉS DEFINEOKAT) nem mindenhol értékeli ki. Például a függvényszignatúrában lévő tömb paraméter méretének cseszik literálon kívül mást elfogadni.
 // - Nincsenek templatek!!! Nincs STL!! NINCS SEMMI! KŐBÁNYAI VAN!!!!!
 // - Az emulátor nevetségesen lassú, de legalább a belső ideje a helyén van.
+// - Nincs enum class!!!
+
+// Konfiguráicós DEFINEok
+#define CONF_DEBUG_LOGGING 1
+#define CONF_PANIC_BOUNDS 1
 
 
 // Pinek
@@ -33,6 +38,8 @@ const unsigned long MILLIS_PER_FRAME = 1000ul / FRAMERATE;
 unsigned long nextFrameDue;
 
 // Debug
+#if CONF_DEBUG_LOGGING == 1
+
 #define DEBUG_PRINT_TIMESTAMP() Serial.print('[');\
 Serial.print(millis());\
 Serial.print(']')
@@ -49,29 +56,75 @@ DEBUG_PRINT(' ');\
 DEBUG_PRINT(text);\
 DEBUG_PRINTLN(val);
 
+#else //
+
+#define DEBUG_PRINT_TIMESTAMP()
+#define DEBUG_PRINT(val)
+#define DEBUG_PRINTLN(val)
+#define DEBUG_LOG(val)
+#define DEBUG_LOG_CAPTIONED(text, val)
+
+#endif
+
+
+const int PANIC_FRAME_INDEX_OUT_OF_RANGE = 1;
+
+
+// Végtelen ciklusban villogja le a megadott `code`-ot.
+void panic(byte code) {
+    Serial.print("Panic code: ");
+    Serial.println(code);
+
+    const int BIT_TIME = 1000;
+
+    byte mask = 0;
+    while(true) {
+        mask >>= 1;
+        if(mask <= 0) {
+            mask = 1 << 7;
+            delay(BIT_TIME * 2);
+        }
+
+        int duty = ((byte)code & mask) ? 500 : 100;
+
+        digitalWrite(LED_BUILTIN, HIGH);
+        delay(duty);
+        digitalWrite(LED_BUILTIN, LOW);
+        delay(BIT_TIME - duty);
+    }
+}
+
+// Mint a sima, csak még pluszba elküld egy üzenet Serial-on.
+void panic(byte code, const char* msg) {
+    Serial.print("Panic message: ");
+    Serial.println(msg);
+    panic(code);
+}
+
 
 namespace fire {
 
+    // Mutábilis tömbök a tűznek, a fillMask tölti fel őket a setupban.
     byte mask1[CHAR_HEIGHT] = {
-        B00000,
-        B00000,
-        B00000,
-        B00000,
-        B00000,
-        B00000,
-        B00000,
-        B00000
+        0b00000,
+        0b00000,
+        0b00000,
+        0b00000,
+        0b00000,
+        0b00000,
+        0b00000,
+        0b00000
     };
 
     byte mask2[CHAR_HEIGHT] = {
-        B00000,
-        B00000,
-        B00000,
-        B00000,
-        B00000,
-        B00000,
-        B00000,
-        B00000
+        0b00000,
+        0b00000,
+        0b00000,
+        0b00000,
+        0b00000,
+        0b00000,
+        0b00000,
+        0b00000
     }; 
 
     const byte SPEED1 = 1;
@@ -110,11 +163,38 @@ namespace fire {
 
 }
 
+namespace gfx {
+
+    class Frame {
+
+    public:
+        byte& index(int x, int y) {
+#if CONF_PANIC_BOUNDS == 1
+            if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) {
+                auto msg = String();
+                msg += "Indexing Frame out of range with x=";
+                msg += x;
+                msg += ", y=";
+                msg += y;
+                panic(PANIC_FRAME_INDEX_OUT_OF_RANGE, msg.c_str());
+            }
+#endif
+            return buffer[(y * LCD_WIDTH) + x]; // A klasszikus 2D tömb indexelős képlet.
+        }
+
+
+    private:
+        byte buffer[LCD_WIDTH * LCD_HEIGHT];
+
+    };
+
+}
+
 
 void setup() {
     Serial.begin(9600);
-    lcd.begin(16, 2);
-    DEBUG_LOG("LCD begin");
+    lcd.begin(LCD_WIDTH, LCD_HEIGHT);
+    DEBUG_LOG("LCD began");
 
     pinMode(PIN_BUTTON_UP, INPUT_PULLUP);
     pinMode(PIN_BUTTON_DOWN, INPUT_PULLUP);
@@ -147,11 +227,24 @@ void loop() {
     fire::compose(fire);
     lcd.createChar(0, fire);
 
-    // A képernyőt feltölteni 25ms (a 40-ből!!!)
-    for(int y = 0; y < LCD_HEIGHT; y++) {
+    // A képernyőt teljesen teleírni 25ms (a 40-ből!!!).
+    // setCursor-ozással felülírni a betűk felét is ugyan annyi idő.
+    // setCursor + az egész képernyő frissítése = 45 ms!!!!!!
+    // Konklúzió: addig érdemes setCursor-ozni, amíg legfeljebb a fele változik a képernyőnek.
+    /*for(int y = 0; y < LCD_HEIGHT; y++) {
         lcd.setCursor(0, y);
         for(int x = 0; x < LCD_WIDTH; x++) {
             lcd.write(byte(0));
+        }
+    }*/
+
+    // 25 ms
+    for(int y = 0; y < LCD_HEIGHT; y++) {
+        for(int x = 0; x < LCD_WIDTH; x++) {
+            if(((x + y) & 1) > 0) {
+                lcd.setCursor(x, y);
+                lcd.write(byte(0));
+            }
         }
     }
 
