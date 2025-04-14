@@ -5,8 +5,10 @@
 // - Nincsenek templatek!!! Nincs STL!! NINCS SEMMI! KŐBÁNYAI VAN!!!!!
 // - Az emulátor nevetségesen lassú, de legalább a belső ideje a helyén van.
 // - Nincs enum class!!!
+// - Nincs reference!!!
+// - Csak akkor értelmezi a classban a struct paraméteres metódust, ha fully qualified az útvonala, tehát NEM JÓ a LiquidCrystal, ::LiquidCrystal kell.
 
-// Konfiguráicós DEFINEok
+// Konfigurációs DEFINEok
 #define CONF_DEBUG_LOGGING 1
 #define CONF_PANIC_BOUNDS 1
 
@@ -168,7 +170,7 @@ namespace gfx {
     class Frame {
 
     public:
-        byte& index(int x, int y) {
+        byte* index(int x, int y) {
 #if CONF_PANIC_BOUNDS == 1
             if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) {
                 auto msg = String();
@@ -179,9 +181,51 @@ namespace gfx {
                 panic(PANIC_FRAME_INDEX_OUT_OF_RANGE, msg.c_str());
             }
 #endif
-            return buffer[(y * LCD_WIDTH) + x]; // A klasszikus 2D tömb indexelős képlet.
+            return &buffer[(y * LCD_WIDTH) + x]; // A klasszikus 2D tömb indexelős képlet.
         }
 
+        void clear(char ch) {
+            for(int i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) buffer[i] = ch;
+        }
+
+        void clear() { clear(' '); }
+
+
+        // Kirajzolja ezt a framet az egész LCD tartalmának felülírásával.
+        void present(::LiquidCrystal* lcd_p) {
+            for(int y = 0; y < LCD_HEIGHT; y++) {
+                lcd_p->setCursor(0, y);
+                for(int x = 0; x < LCD_WIDTH; x++) {
+                    lcd_p->write(*index(x, y));
+                }
+            }
+        }
+
+        // Kirajzolja ezt a Framet egy már fentlévőre.
+        void presentDifferential(::LiquidCrystal* lcd_p, gfx::Frame* last_p) {
+            int differences = 0; // Vajon a compiler csinál ebből byte-t?
+            for(int y = 0; y < LCD_HEIGHT; y++) {
+                for(int x = 0; x < LCD_WIDTH; x++) {
+                    if(*this->index(x, y) != *last_p->index(x, y)) differences++;
+                }
+            }
+
+            // Legalább a fele különbözik?
+            if(differences * 2 >= LCD_WIDTH * LCD_HEIGHT) {
+                this->present(lcd_p); // Akkor csak present-eld simán.
+            } else {
+                // Kevés különbség, mehetünk esetenként.
+                for(int y = 0; y < LCD_HEIGHT; y++) {
+                    for(int x = 0; x < LCD_WIDTH; x++) {
+                        byte here = *this->index(x, y);
+                        if(here != *last_p->index(x, y)) {
+                            lcd_p->setCursor(x, y);
+                            lcd_p->write(here);
+                        }
+                    }
+                }
+            }
+        }
 
     private:
         byte buffer[LCD_WIDTH * LCD_HEIGHT];
@@ -189,6 +233,13 @@ namespace gfx {
     };
 
 }
+
+
+
+gfx::Frame frontBuffer;
+gfx::Frame backBuffer;
+gfx::Frame* frontPtr = &frontBuffer;
+gfx::Frame* backPtr = &backBuffer;
 
 
 void setup() {
@@ -215,6 +266,9 @@ void setup() {
 
     DEBUG_LOG_CAPTIONED("Frame length: ", MILLIS_PER_FRAME);
     nextFrameDue = millis() + MILLIS_PER_FRAME;
+
+    frontBuffer.clear();
+    backBuffer.clear();
 }
 
 void loop() {
@@ -227,37 +281,32 @@ void loop() {
     fire::compose(fire);
     lcd.createChar(0, fire);
 
-    // A képernyőt teljesen teleírni 25ms (a 40-ből!!!).
-    // setCursor-ozással felülírni a betűk felét is ugyan annyi idő.
-    // setCursor + az egész képernyő frissítése = 45 ms!!!!!!
-    // Konklúzió: addig érdemes setCursor-ozni, amíg legfeljebb a fele változik a képernyőnek.
-    /*for(int y = 0; y < LCD_HEIGHT; y++) {
-        lcd.setCursor(0, y);
-        for(int x = 0; x < LCD_WIDTH; x++) {
-            lcd.write(byte(0));
-        }
-    }*/
-
-    // 25 ms
-    for(int y = 0; y < LCD_HEIGHT; y++) {
-        for(int x = 0; x < LCD_WIDTH; x++) {
-            if(((x + y) & 1) > 0) {
-                lcd.setCursor(x, y);
-                lcd.write(byte(0));
-            }
-        }
+    // Demo: ' ' -> *, * -> (tűz).
+    byte* ch = frontPtr->index(random(LCD_WIDTH), random(LCD_HEIGHT));
+    if(*ch != '*') {
+        *ch = '*';
+    } else {
+        *ch = 0;
     }
 
-    lcd.setCursor(2, 0);
-    if(up) lcd.print(" Up");
-    if(down) lcd.print(" Down");
-    if(right) lcd.print(" Right");
+    frontPtr->presentDifferential(&lcd, backPtr);
+
+    *backPtr = *frontPtr; // Átmásolás (mert nem töltjük ki a teljes front buffert)
+
+    // Swap
+    gfx::Frame* tmp = frontPtr;
+    frontPtr = backPtr;
+    backPtr = tmp;
 
     // Kitaláljuk, mennyit kell várni a következő frame elejéig
     unsigned long now = millis();
     if(now < nextFrameDue) {
         unsigned long slack = nextFrameDue - now;
+
+        digitalWrite(LED_BUILTIN, HIGH);
         delay(nextFrameDue - now);
+        digitalWrite(LED_BUILTIN, LOW);
+
         DEBUG_LOG_CAPTIONED("Slack: ", slack);
     } else {
         DEBUG_LOG_CAPTIONED("Lag: ", now - nextFrameDue);
