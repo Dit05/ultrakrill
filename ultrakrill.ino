@@ -107,44 +107,45 @@ void panic(byte code, const char* msg) {
 }
 
 
-namespace fire {
-
-    const byte SPEED1 = 1;
-    const byte SPEED2 = 3;
-    const byte PERIOD = SPEED1 * SPEED2 * CHAR_WIDTH; // Igazából lcm kéne az összeszorzás helyett.
-
-
-    void fillMask(byte mask[8 /* CHAR_HEIGHT, csak a Tinkercad valamiért nem szereti */]) {
-        for(size_t i = 0; i < CHAR_HEIGHT; i++) {
-            byte row = 0;
-            for(int j = 0; j < i + 1; j++) {
-                row |= (B1 << random(CHAR_WIDTH));
-            }
-            mask[i] = row;
-        }
-    }
-
-    byte rotateCharRow(byte row, byte shift) {
-        shift %= CHAR_WIDTH;
-        if(shift < 0) shift = CHAR_WIDTH - shift;
-        row = (row << shift) | (row >> (CHAR_WIDTH - shift));
-        return row;
-    }
-
-    void compose(byte dest[8 /* CHAR_HEIGHT */], byte mask1[8], byte mask2[8], byte phase) {
-        for(size_t i = 0; i < CHAR_HEIGHT; i++) {
-            dest[i] = rotateCharRow(mask1[i], phase / SPEED1)
-                & rotateCharRow(mask2[i], -(phase / SPEED2));
-        }
-    }
-
-    void advancePhase(byte* phase) {
-        *phase = (*phase + 1) % PERIOD;
-    }
-
-}
 
 namespace gfx {
+
+    namespace fire {
+
+        const byte SPEED1 = 1;
+        const byte SPEED2 = 3;
+        const byte PERIOD = SPEED1 * SPEED2 * CHAR_WIDTH; // Igazából lcm kéne az összeszorzás helyett.
+
+
+        void fillMask(byte mask[8 /* CHAR_HEIGHT, csak a Tinkercad valamiért nem szereti */]) {
+            for(size_t i = 0; i < CHAR_HEIGHT; i++) {
+                byte row = 0;
+                for(int j = 0; j < i + 1; j++) {
+                    row |= (B1 << random(CHAR_WIDTH));
+                }
+                mask[i] = row;
+            }
+        }
+
+        byte rotateCharRow(byte row, byte shift) {
+            shift %= CHAR_WIDTH;
+            if(shift < 0) shift = CHAR_WIDTH - shift;
+            row = (row << shift) | (row >> (CHAR_WIDTH - shift));
+            return row;
+        }
+
+        void compose(byte dest[8 /* CHAR_HEIGHT */], byte mask1[8], byte mask2[8], byte phase) {
+            for(size_t i = 0; i < CHAR_HEIGHT; i++) {
+                dest[i] = rotateCharRow(mask1[i], phase / SPEED1)
+                    & rotateCharRow(mask2[i], -(phase / SPEED2));
+            }
+        }
+
+        void advancePhase(byte* phase) {
+            *phase = (*phase + 1) % PERIOD;
+        }
+
+    }
 
     namespace sprites {
 
@@ -326,8 +327,7 @@ namespace gfx {
                     bool streak = false; // A setCursor kihagyható, ha egymás mellett van a két módosítandó.
                     for(int x = 0; x < LCD_WIDTH; x++) {
                         byte here = *this->index(x, y);
-                        // TODO a custom charactereket a valóságban is mindig újra kell rajzolni? A tüzet miért nem??
-                        if(here < 8 || here != *last_p->index(x, y)) {
+                        if(here != *last_p->index(x, y)) {
                             if(!streak) lcd_p->setCursor(x, y);
                             lcd_p->write(here);
                             streak = true;
@@ -366,20 +366,26 @@ namespace game {
             this->lcd_p = lcd_p;
             bufferB.clear();
 
-            fire::fillMask(fireMask1);
-            fire::fillMask(fireMask2);
+            gfx::fire::fillMask(fireMask1);
+            gfx::fire::fillMask(fireMask2);
 
             initializeCustomChars();
         }
 
 
+        void setButtons(bool up, bool down, bool right) {
+            this->buttonUp = up;
+            this->buttonDown = down;
+            this->buttonRight = right;
+        }
+
         void process() {
             animationTimer++;
-            playerFrame = (playerFrame + 1) % 2;
-            if(animationTimer % 2 == 0) filthFrame = (filthFrame + 1) % 2;
-            impFrame = (impFrame + 1) % 2;
+            if(animationTimer % 5 == 0) playerFrame = (playerFrame + 1) % 2;
+            if(animationTimer % 10 == 0) filthFrame = (filthFrame + 1) % 2;
+            if(animationTimer % 10 == 0) impFrame = (impFrame + 1) % 2;
 
-            fire::advancePhase(&firePhase);
+            gfx::fire::advancePhase(&firePhase);
         }
 
         void initializeCustomChars() {
@@ -392,8 +398,11 @@ namespace game {
         }
 
         void draw() {
-            bufferA.clear();
+            frame_p->clear();
 
+            if(buttonUp) delay(15);
+            if(buttonDown) delay(15);
+            if(buttonRight) delay(15);
 
             *frame_p->index(0, LCD_HEIGHT - 1) = ::gfx::CHAR_PLAYER;
             *frame_p->index(4, LCD_HEIGHT - 1) = ::gfx::CHAR_FIRE;
@@ -405,6 +414,10 @@ namespace game {
             // HUD
             *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
             *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = '?';
+
+            if(buttonUp) *frame_p->index(0, 0) = 'u';
+            if(buttonDown) *frame_p->index(1, 0) = 'd';
+            if(buttonRight) *frame_p->index(2, 0) = 'r';
 
             setCustomChars();
             presentAndSwap();
@@ -457,6 +470,10 @@ namespace game {
         const byte TILE_WALL_CRACKED = gfx::CHAR_WALL_CRACKED;
         const byte TILE_FIRE = gfx::CHAR_FIRE;
 
+        bool buttonUp = false;
+        bool buttonDown = false;
+        bool buttonRight = false;
+
         byte firePhase = 0;
 
         byte animationTimer = 0;
@@ -482,7 +499,7 @@ namespace game {
             }
 
             byte fire[CHAR_HEIGHT];
-            fire::compose(fire, fireMask1, fireMask2, firePhase);
+            gfx::fire::compose(fire, fireMask1, fireMask2, firePhase);
             lcd_p->createChar(gfx::CHAR_FIRE, fire);
         }
 
@@ -531,6 +548,7 @@ void loop() {
     bool down = (digitalRead(PIN_BUTTON_DOWN) == LOW);
     bool right = (digitalRead(PIN_BUTTON_RIGHT) == LOW);
 
+    gameInst.setButtons(up, down, right);
 
     gameInst.process();
     // Ha időhiányban szenvedünk, akkor átugorjuk a kirajzolást, mert ez jelentős időbe telik, és "nem hat" a játékmenetre.
