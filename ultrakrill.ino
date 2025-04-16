@@ -110,12 +110,64 @@ void panic(byte code, const char* msg) {
 
 namespace gfx {
 
-    namespace fire {
+    class Fire {
 
+    public:
+
+        Fire() {
+            fillMask(mask1);
+            fillMask(mask2);
+        }
+
+        void compose(byte dest[8 /* CHAR_HEIGHT */]) {
+            for(size_t i = 0; i < CHAR_HEIGHT; i++) {
+                dest[i] = rotateCharRow(mask1[i], phase / SPEED1)
+                    & rotateCharRow(mask2[i], -(phase / SPEED2));
+            }
+        }
+
+        void advancePhase() {
+            phase = (phase + 1) % PERIOD;
+        }
+
+    private:
         const byte SPEED1 = 1;
         const byte SPEED2 = 3;
         const byte PERIOD = SPEED1 * SPEED2 * CHAR_WIDTH; // Igazából lcm kéne az összeszorzás helyett.
 
+
+        byte phase;
+
+        // Mutábilis tömbök a tűznek, a fillMask tölti fel őket.
+        byte mask1[CHAR_HEIGHT] = {
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000
+        };
+
+        byte mask2[CHAR_HEIGHT] = {
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000
+        }; 
+
+
+        byte rotateCharRow(byte row, byte shift) {
+            shift %= CHAR_WIDTH;
+            if(shift < 0) shift = CHAR_WIDTH - shift;
+            row = (row << shift) | (row >> (CHAR_WIDTH - shift));
+            return row;
+        }
 
         void fillMask(byte mask[8 /* CHAR_HEIGHT, csak a Tinkercad valamiért nem szereti */]) {
             for(size_t i = 0; i < CHAR_HEIGHT; i++) {
@@ -127,25 +179,7 @@ namespace gfx {
             }
         }
 
-        byte rotateCharRow(byte row, byte shift) {
-            shift %= CHAR_WIDTH;
-            if(shift < 0) shift = CHAR_WIDTH - shift;
-            row = (row << shift) | (row >> (CHAR_WIDTH - shift));
-            return row;
-        }
-
-        void compose(byte dest[8 /* CHAR_HEIGHT */], byte mask1[8], byte mask2[8], byte phase) {
-            for(size_t i = 0; i < CHAR_HEIGHT; i++) {
-                dest[i] = rotateCharRow(mask1[i], phase / SPEED1)
-                    & rotateCharRow(mask2[i], -(phase / SPEED2));
-            }
-        }
-
-        void advancePhase(byte* phase) {
-            *phase = (*phase + 1) % PERIOD;
-        }
-
-    }
+    };
 
     namespace sprites {
 
@@ -366,9 +400,6 @@ namespace game {
             this->lcd_p = lcd_p;
             bufferB.clear();
 
-            gfx::fire::fillMask(fireMask1);
-            gfx::fire::fillMask(fireMask2);
-
             initializeCustomChars();
         }
 
@@ -385,7 +416,7 @@ namespace game {
             if(animationTimer % 10 == 0) filthFrame = (filthFrame + 1) % 2;
             if(animationTimer % 10 == 0) impFrame = (impFrame + 1) % 2;
 
-            gfx::fire::advancePhase(&firePhase);
+            fire.advancePhase();
         }
 
         void initializeCustomChars() {
@@ -410,6 +441,11 @@ namespace game {
             *frame_p->index(6, LCD_HEIGHT - 1) = ::gfx::CHAR_WALL_CRACKED;
             *frame_p->index(7, LCD_HEIGHT - 1) = ::gfx::CHAR_FILTH;
             *frame_p->index(8, LCD_HEIGHT - 1) = ::gfx::CHAR_IMP;
+
+            if(animationTimer % 2 == 0) {
+                *frame_p->index(4, LCD_HEIGHT - 1) = '*';
+            }
+            *frame_p->index(2, LCD_HEIGHT - 1) = '*';
 
             // HUD
             *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
@@ -442,29 +478,6 @@ namespace game {
             0b00000
         };
 
-        // Mutábilis tömbök a tűznek, a fillMask tölti fel őket.
-        byte fireMask1[CHAR_HEIGHT] = {
-            0b00000,
-            0b00000,
-            0b00000,
-            0b00000,
-            0b00000,
-            0b00000,
-            0b00000,
-            0b00000
-        };
-
-        byte fireMask2[CHAR_HEIGHT] = {
-            0b00000,
-            0b00000,
-            0b00000,
-            0b00000,
-            0b00000,
-            0b00000,
-            0b00000,
-            0b00000
-        }; 
-
         const byte TILE_EMPTY = ' ';
         const byte TILE_WALL = gfx::CHAR_WALL;
         const byte TILE_WALL_CRACKED = gfx::CHAR_WALL_CRACKED;
@@ -474,7 +487,7 @@ namespace game {
         bool buttonDown = false;
         bool buttonRight = false;
 
-        byte firePhase = 0;
+        gfx::Fire fire = {};
 
         byte animationTimer = 0;
         byte playerFrame = 0;
@@ -498,9 +511,9 @@ namespace game {
                 actualImpFrame = impFrame;
             }
 
-            byte fire[CHAR_HEIGHT];
-            gfx::fire::compose(fire, fireMask1, fireMask2, firePhase);
-            lcd_p->createChar(gfx::CHAR_FIRE, fire);
+            byte composedFire[CHAR_HEIGHT];
+            fire.compose(composedFire);
+            lcd_p->createChar(gfx::CHAR_FIRE, composedFire);
         }
 
         void presentAndSwap() {
