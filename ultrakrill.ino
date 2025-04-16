@@ -109,33 +109,9 @@ void panic(byte code, const char* msg) {
 
 namespace fire {
 
-    // Mutábilis tömbök a tűznek, a fillMask tölti fel őket a setupban.
-    byte mask1[CHAR_HEIGHT] = {
-        0b00000,
-        0b00000,
-        0b00000,
-        0b00000,
-        0b00000,
-        0b00000,
-        0b00000,
-        0b00000
-    };
-
-    byte mask2[CHAR_HEIGHT] = {
-        0b00000,
-        0b00000,
-        0b00000,
-        0b00000,
-        0b00000,
-        0b00000,
-        0b00000,
-        0b00000
-    }; 
-
     const byte SPEED1 = 1;
     const byte SPEED2 = 3;
     const byte PERIOD = SPEED1 * SPEED2 * CHAR_WIDTH; // Igazából lcm kéne az összeszorzás helyett.
-    byte phase = 0;
 
 
     void fillMask(byte mask[8 /* CHAR_HEIGHT, csak a Tinkercad valamiért nem szereti */]) {
@@ -155,15 +131,15 @@ namespace fire {
         return row;
     }
 
-    void compose(byte dest[8 /* CHAR_HEIGHT */]) {
+    void compose(byte dest[8 /* CHAR_HEIGHT */], byte mask1[8], byte mask2[8], byte phase) {
         for(size_t i = 0; i < CHAR_HEIGHT; i++) {
             dest[i] = rotateCharRow(mask1[i], phase / SPEED1)
                 & rotateCharRow(mask2[i], -(phase / SPEED2));
         }
     }
 
-    void advancePhase() {
-        phase = (phase + 1) % PERIOD;
+    void advancePhase(byte* phase) {
+        *phase = (*phase + 1) % PERIOD;
     }
 
 }
@@ -229,7 +205,7 @@ namespace gfx {
 
         const byte FILTH1[CHAR_HEIGHT] = {
             0b00000,
-            0b10101,
+            0b01110,
             0b11011,
             0b01110,
             0b11011,
@@ -347,11 +323,16 @@ namespace gfx {
             } else {
                 // Kevés különbség, mehetünk esetenként.
                 for(int y = 0; y < LCD_HEIGHT; y++) {
+                    bool streak = false; // A setCursor kihagyható, ha egymás mellett van a két módosítandó.
                     for(int x = 0; x < LCD_WIDTH; x++) {
                         byte here = *this->index(x, y);
-                        if(here != *last_p->index(x, y)) {
-                            lcd_p->setCursor(x, y);
+                        // TODO a custom charactereket a valóságban is mindig újra kell rajzolni? A tüzet miért nem??
+                        if(here < 8 || here != *last_p->index(x, y)) {
+                            if(!streak) lcd_p->setCursor(x, y);
                             lcd_p->write(here);
+                            streak = true;
+                        } else {
+                            streak = false;
                         }
                     }
                 }
@@ -375,26 +356,152 @@ namespace gfx {
 
 }
 
+namespace game {
+
+    class Game {
+    public:
 
 
-gfx::Frame frontBuffer;
-gfx::Frame backBuffer;
-gfx::Frame* frontPtr = &frontBuffer;
-gfx::Frame* backPtr = &backBuffer;
+        Game(::LiquidCrystal* lcd_p) {
+            this->lcd_p = lcd_p;
+            bufferB.clear();
 
-// Ezt töltögetjük majd fel annyira, hogy az életerőt mutassa.
-byte healthChar[CHAR_HEIGHT] = {
-    0b00000,
-    0b00000,
-    0b00000,
-    0b00000,
-    0b00000,
-    0b00000,
-    0b00000,
-    0b00000
-};
+            fire::fillMask(fireMask1);
+            fire::fillMask(fireMask2);
+
+            initializeCustomChars();
+        }
+
+
+        void process() {
+            animationTimer++;
+            playerFrame = (playerFrame + 1) % 2;
+            if(animationTimer % 2 == 0) filthFrame = (filthFrame + 1) % 2;
+            impFrame = (impFrame + 1) % 2;
+
+            fire::advancePhase(&firePhase);
+        }
+
+        void initializeCustomChars() {
+            // A const sajnos elcastolandó, mert a LiquidCrystal hülye.
+            lcd_p->createChar(gfx::CHAR_WALL, (byte*)gfx::sprites::WALL);
+            lcd_p->createChar(gfx::CHAR_WALL_CRACKED, (byte*)gfx::sprites::WALL_CRACKED);
+
+            actualPlayerFrame = 255;
+            setCustomChars();
+        }
+
+        void draw() {
+            bufferA.clear();
+
+
+            *frame_p->index(0, LCD_HEIGHT - 1) = ::gfx::CHAR_PLAYER;
+            *frame_p->index(4, LCD_HEIGHT - 1) = ::gfx::CHAR_FIRE;
+            *frame_p->index(5, LCD_HEIGHT - 1) = ::gfx::CHAR_WALL;
+            *frame_p->index(6, LCD_HEIGHT - 1) = ::gfx::CHAR_WALL_CRACKED;
+            *frame_p->index(7, LCD_HEIGHT - 1) = ::gfx::CHAR_FILTH;
+            *frame_p->index(8, LCD_HEIGHT - 1) = ::gfx::CHAR_IMP;
+
+            // HUD
+            *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
+            *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = '?';
+
+            setCustomChars();
+            presentAndSwap();
+        }
+
+    private:
+        LiquidCrystal* lcd_p;
+        gfx::Frame bufferA;
+        gfx::Frame bufferB;
+        gfx::Frame* frame_p = &bufferA;
+        gfx::Frame* backPtr = &bufferB;
+
+        // Ezt töltögetjük majd fel annyira, hogy az életerőt mutassa.
+        byte healthChar[CHAR_HEIGHT] = {
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000
+        };
+
+        // Mutábilis tömbök a tűznek, a fillMask tölti fel őket.
+        byte fireMask1[CHAR_HEIGHT] = {
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000
+        };
+
+        byte fireMask2[CHAR_HEIGHT] = {
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000
+        }; 
+
+        const byte TILE_EMPTY = ' ';
+        const byte TILE_WALL = gfx::CHAR_WALL;
+        const byte TILE_WALL_CRACKED = gfx::CHAR_WALL_CRACKED;
+        const byte TILE_FIRE = gfx::CHAR_FIRE;
+
+        byte firePhase = 0;
+
+        byte animationTimer = 0;
+        byte playerFrame = 0;
+        byte actualPlayerFrame = 255;
+        byte filthFrame = 0;
+        byte actualFilthFrame = 255;
+        byte impFrame = 0;
+        byte actualImpFrame = 255;
+
+        void setCustomChars() {
+            if(actualPlayerFrame != playerFrame) {
+                lcd_p->createChar(::gfx::CHAR_PLAYER, (byte*)(playerFrame ? &::gfx::sprites::PLAYER_WALK1 : &::gfx::sprites::PLAYER_WALK2));
+                actualPlayerFrame = playerFrame;
+            }
+            if(actualFilthFrame != filthFrame) {
+                lcd_p->createChar(::gfx::CHAR_FILTH, (byte*)(filthFrame ? &::gfx::sprites::FILTH1 : &::gfx::sprites::FILTH2));
+                actualFilthFrame = filthFrame;
+            }
+            if(actualImpFrame != impFrame) {
+                lcd_p->createChar(::gfx::CHAR_IMP, (byte*)(impFrame ? &::gfx::sprites::IMP1 : &::gfx::sprites::IMP2));
+                actualImpFrame = impFrame;
+            }
+
+            byte fire[CHAR_HEIGHT];
+            fire::compose(fire, fireMask1, fireMask2, firePhase);
+            lcd_p->createChar(gfx::CHAR_FIRE, fire);
+        }
+
+        void presentAndSwap() {
+            frame_p->presentDifferential(lcd_p, backPtr);
+
+            gfx::Frame* tmp = frame_p;
+            frame_p = backPtr;
+            backPtr = tmp;
+        }
+    };
+
+}
+
+
 
 bool lagging = false; // Időtúllépéses-e az előző frame.
+
+game::Game gameInst(&lcd);
 
 
 void setup() {
@@ -415,15 +522,8 @@ void setup() {
     pinMode(PIN_LCD_DB7, OUTPUT);
     DEBUG_LOG("Pin modes set");
 
-    fire::fillMask(fire::mask1);
-    fire::fillMask(fire::mask2);
-    DEBUG_LOG("Fire filled");
-
     DEBUG_LOG_CAPTIONED("Frame length: ", MILLIS_PER_FRAME);
     nextFrameDue = millis() + MILLIS_PER_FRAME;
-
-    frontBuffer.clear();
-    backBuffer.clear();
 }
 
 void loop() {
@@ -431,35 +531,11 @@ void loop() {
     bool down = (digitalRead(PIN_BUTTON_DOWN) == LOW);
     bool right = (digitalRead(PIN_BUTTON_RIGHT) == LOW);
 
-    byte fire[CHAR_HEIGHT];
-    fire::advancePhase();
-    fire::compose(fire);
-    lcd.createChar(0, fire);
 
-
-    // Demo: ' ' -> *, * -> (tűz).
-    while(random(3) != 0) {
-        byte* ch = frontPtr->index(random(LCD_WIDTH), random(LCD_HEIGHT));
-        if(*ch != '*') {
-            *ch = '*';
-        } else {
-            *ch = 0;
-        }
-    }
-
-    if(up) delay(MILLIS_PER_FRAME); // Lag gomb
-
-
+    gameInst.process();
     // Ha időhiányban szenvedünk, akkor átugorjuk a kirajzolást, mert ez jelentős időbe telik, és "nem hat" a játékmenetre.
     if(!lagging) {
-        frontPtr->presentDifferential(&lcd, backPtr);
-
-        *backPtr = *frontPtr; // Átmásolás (mert nem töltjük ki a teljes front buffert)
-
-        // Swap
-        gfx::Frame* tmp = frontPtr;
-        frontPtr = backPtr;
-        backPtr = tmp;
+        gameInst.draw();
     }
 
     // Kitaláljuk, mennyit kell várni a következő frame elejéig
