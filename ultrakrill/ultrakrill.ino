@@ -1,4 +1,6 @@
+#ifndef LCD_EMULATOR
 #include <LiquidCrystal.h>
+#endif
 
 // Tinkercad caveatek listája:
 // - A konstansokat (ÉS DEFINEOKAT) nem mindenhol értékeli ki. Például a függvényszignatúrában lévő tömb paraméter méretének cseszik literálon kívül mást elfogadni.
@@ -139,9 +141,9 @@ struct Buttons {
 
     Buttons operator ^(Buttons others) {
         return Buttons {
-            .up = up ^ others.up,
-            .down = down ^ others.down,
-            .right = right ^ others.right
+            .up = bool(up ^ others.up),
+            .down = bool(down ^ others.down),
+            .right = bool(right ^ others.right)
         };
     }
 };
@@ -235,7 +237,7 @@ namespace gfx {
             for(size_t i = 0; i < CHAR_HEIGHT; i++) {
                 byte row = 0;
                 for(int j = 0; j < i + 1; j++) {
-                    row |= (B1 << random(CHAR_WIDTH));
+                    row |= (0b1 << random(CHAR_WIDTH));
                 }
                 mask[i] = row;
             }
@@ -524,7 +526,7 @@ namespace game {
             *frame_p->index(7, LCD_HEIGHT - 1) = ::gfx::CHAR_FILTH;
             *frame_p->index(8, LCD_HEIGHT - 1) = ::gfx::CHAR_IMP;
 
-            if(animationTimer % 2 == 0) {
+            if(frameNumber % 2 == 0) {
                 *frame_p->index(4, LCD_HEIGHT - 1) = '*';
             }
             *frame_p->index(2, LCD_HEIGHT - 1) = '*';
@@ -541,6 +543,8 @@ namespace game {
             gfx::Frame* tmp = frame_p;
             frame_p = backPtr;
             backPtr = tmp;
+
+            frameNumber++;
         }
 
 
@@ -582,13 +586,15 @@ namespace game {
 
         gfx::Fire fire = {};
 
-        byte animationTimer = 0;
+        byte animationTimer = 0; // processenként nő
         byte playerFrame = 0;
         byte actualPlayerFrame = 255;
         byte filthFrame = 0;
         byte actualFilthFrame = 255;
         byte impFrame = 0;
         byte actualImpFrame = 255;
+
+        byte frameNumber = 0; // drawenként nő
 
         void setCustomChars(::LiquidCrystal* lcd_p) {
             if(actualPlayerFrame != playerFrame) {
@@ -641,8 +647,8 @@ void setup() {
     DEBUG_LOG_CAPTIONED("Frame length: ", MILLIS_PER_FRAME);
     nextFrameDue = millis() + MILLIS_PER_FRAME;
 
-    //scene = new game::Game();
-    scene = new gfx::CharViewer();
+    scene = new game::Game();
+    //scene = new gfx::CharViewer();
     scene->resume(&lcd);
 }
 
@@ -663,7 +669,11 @@ void loop() {
     // Ha időhiányban szenvedünk, akkor átugorjuk a kirajzolást, mert ez jelentős időbe telik, és "nem hat" a játékmenetre.
     if(!lagging) {
         scene->draw(&lcd);
+#ifdef LCD_EMULATOR
+        lcd.redraw();
+#endif
     }
+
 
     // Kitaláljuk, mennyit kell várni a következő frame elejéig
     unsigned long now = millis();
@@ -672,7 +682,7 @@ void loop() {
         unsigned long slack = nextFrameDue - now;
 
         digitalWrite(LED_BUILTIN, HIGH);
-        delay(nextFrameDue - now);
+        delay(slack);
         digitalWrite(LED_BUILTIN, LOW);
 
         DEBUG_LOG_CAPTIONED("Slack: ", slack);
