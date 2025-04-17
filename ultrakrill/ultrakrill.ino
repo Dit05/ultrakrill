@@ -7,6 +7,7 @@
 // - Nincs enum class!!!
 // - Nincs reference!!!
 // - Csak akkor értelmezi a classban a struct paraméteres metódust, ha fully qualified az útvonala, tehát NEM JÓ a LiquidCrystal, ::LiquidCrystal kell.
+// - A virtual method csak úgy parsolódik helyesen, ha {} helyett = 0;.
 
 // Konfigurációs DEFINEok
 #define CONF_DEBUG_LOGGING 1
@@ -107,8 +108,69 @@ void panic(byte code, const char* msg) {
 }
 
 
+struct Buttons {
+    bool up;
+    bool down;
+    bool right;
+
+    Buttons operator !() {
+        return Buttons {
+            .up = !up,
+            .down = !down,
+            .right = !right
+        };
+    }
+
+    Buttons operator ||(Buttons others) {
+        return Buttons {
+            .up = up || others.up,
+            .down = down || others.down,
+            .right = right || others.right
+        };
+    }
+
+    Buttons operator &&(Buttons others) {
+        return Buttons {
+            .up = up && others.up,
+            .down = down && others.down,
+            .right = right && others.right
+        };
+    }
+
+    Buttons operator ^(Buttons others) {
+        return Buttons {
+            .up = up ^ others.up,
+            .down = down ^ others.down,
+            .right = right ^ others.right
+        };
+    }
+};
+
+class Scene {
+
+public:
+    virtual void setInputs(Buttons held, Buttons pressed, Buttons released) = 0;
+    virtual void process() = 0;
+    virtual void draw(::LiquidCrystal* lcd_p) = 0;
+    virtual void suspend() = 0;
+    virtual void resume(::LiquidCrystal* lcd_p) = 0;
+
+};
+
 
 namespace gfx {
+
+    const char* HEX_DIGITS = "0123456789ABCDEF";
+
+    const byte CHAR_FIRE = 0; // Procedural fire
+    const byte CHAR_PLAYER = 1; // Animated player character
+    const byte CHAR_WALL = 2; // Pristine wall
+    const byte CHAR_WALL_CRACKED = 3; // Damaged wall
+    const byte CHAR_HEALTH = 4; // Procedural health bar
+    const byte CHAR_FILTH = 5; // Animated character for the ground enemy.
+    const byte CHAR_IMP = 6; // Animated character for the flying-shooting enemy.
+    const byte CHAR_UNUSED7 = 7;
+
 
     class Fire {
 
@@ -379,35 +441,64 @@ namespace gfx {
     };
 
 
-    const byte CHAR_FIRE = 0; // Procedural fire
-    const byte CHAR_PLAYER = 1; // Animated player character
-    const byte CHAR_WALL = 2; // Pristine wall
-    const byte CHAR_WALL_CRACKED = 3; // Damaged wall
-    const byte CHAR_HEALTH = 4; // Procedural health bar
-    const byte CHAR_FILTH = 5; // Animated character for the ground enemy.
-    const byte CHAR_IMP = 6; // Animated character for the flying-shooting enemy.
-    const byte CHAR_UNUSED7 = 7;
+    class CharViewer : public ::Scene {
+    public:
+        void setInputs(::Buttons held, ::Buttons pressed, ::Buttons released) {
+            this->pressed = pressed;
+        }
+
+        void process() {
+            for(int i = 0; i < LCD_HEIGHT; i++) if(pressed.up && offset != 0) offset--;
+            for(int i = 0; i < LCD_HEIGHT; i++) if(pressed.down && offset + LCD_HEIGHT < 256 / 8) offset++;
+        }
+
+        void draw(::LiquidCrystal* lcd_p) {
+            for(int y = 0; y < LCD_HEIGHT; y++) {
+                int start = (y + offset) * 8;
+                lcd_p->setCursor(0, y);
+                lcd_p->write(::gfx::HEX_DIGITS[(start & 0xF0) >> 4]);
+                lcd_p->write(::gfx::HEX_DIGITS[start & 0x0F]);
+                lcd_p->write('|');
+
+                for(int x = 0; x < 8; x++) {
+                    lcd_p->write(start + x);
+                }
+            }
+        }
+
+        void suspend() { /* do nothing */ }
+        void resume(::LiquidCrystal* lcd_p) {
+            lcd_p->clear();
+        }
+
+    private:
+        Buttons pressed;
+        byte offset;
+    };
 
 }
 
 namespace game {
 
-    class Game {
+    class Game : public Scene {
+
     public:
 
-
-        Game(::LiquidCrystal* lcd_p) {
-            this->lcd_p = lcd_p;
+        Game() {
             bufferB.clear();
-
-            initializeCustomChars();
         }
 
 
-        void setButtons(bool up, bool down, bool right) {
-            this->buttonUp = up;
-            this->buttonDown = down;
-            this->buttonRight = right;
+        void setInputs(::Buttons held, ::Buttons pressed, ::Buttons released) {
+            buttonsHeld = held;
+            buttonsPressed = pressed;
+            buttonsReleased = released;
+        }
+
+        void suspend() { /* do nothing */ }
+
+        void resume(::LiquidCrystal* lcd_p) {
+            initializeCustomChars(lcd_p);
         }
 
         void process() {
@@ -419,21 +510,12 @@ namespace game {
             fire.advancePhase();
         }
 
-        void initializeCustomChars() {
-            // A const sajnos elcastolandó, mert a LiquidCrystal hülye.
-            lcd_p->createChar(gfx::CHAR_WALL, (byte*)gfx::sprites::WALL);
-            lcd_p->createChar(gfx::CHAR_WALL_CRACKED, (byte*)gfx::sprites::WALL_CRACKED);
-
-            actualPlayerFrame = 255;
-            setCustomChars();
-        }
-
-        void draw() {
+        void draw(::LiquidCrystal* lcd_p) {
             frame_p->clear();
 
-            if(buttonUp) delay(15);
-            if(buttonDown) delay(15);
-            if(buttonRight) delay(15);
+            if(buttonsHeld.up) delay(15);
+            if(buttonsHeld.down) delay(15);
+            if(buttonsHeld.right) delay(15);
 
             *frame_p->index(0, LCD_HEIGHT - 1) = ::gfx::CHAR_PLAYER;
             *frame_p->index(4, LCD_HEIGHT - 1) = ::gfx::CHAR_FIRE;
@@ -451,16 +533,27 @@ namespace game {
             *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
             *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = '?';
 
-            if(buttonUp) *frame_p->index(0, 0) = 'u';
-            if(buttonDown) *frame_p->index(1, 0) = 'd';
-            if(buttonRight) *frame_p->index(2, 0) = 'r';
+            // Present
+            setCustomChars(lcd_p);
+            frame_p->presentDifferential(lcd_p, backPtr);
 
-            setCustomChars();
-            presentAndSwap();
+            // Swap buffers
+            gfx::Frame* tmp = frame_p;
+            frame_p = backPtr;
+            backPtr = tmp;
+        }
+
+
+        void initializeCustomChars(::LiquidCrystal* lcd_p) {
+            // A const sajnos elcastolandó, mert a LiquidCrystal hülye.
+            lcd_p->createChar(gfx::CHAR_WALL, (byte*)gfx::sprites::WALL);
+            lcd_p->createChar(gfx::CHAR_WALL_CRACKED, (byte*)gfx::sprites::WALL_CRACKED);
+
+            actualPlayerFrame = 255;
+            setCustomChars(lcd_p);
         }
 
     private:
-        LiquidCrystal* lcd_p;
         gfx::Frame bufferA;
         gfx::Frame bufferB;
         gfx::Frame* frame_p = &bufferA;
@@ -483,9 +576,9 @@ namespace game {
         const byte TILE_WALL_CRACKED = gfx::CHAR_WALL_CRACKED;
         const byte TILE_FIRE = gfx::CHAR_FIRE;
 
-        bool buttonUp = false;
-        bool buttonDown = false;
-        bool buttonRight = false;
+        Buttons buttonsHeld = {};
+        Buttons buttonsPressed = {};
+        Buttons buttonsReleased = {};
 
         gfx::Fire fire = {};
 
@@ -497,7 +590,7 @@ namespace game {
         byte impFrame = 0;
         byte actualImpFrame = 255;
 
-        void setCustomChars() {
+        void setCustomChars(::LiquidCrystal* lcd_p) {
             if(actualPlayerFrame != playerFrame) {
                 lcd_p->createChar(::gfx::CHAR_PLAYER, (byte*)(playerFrame ? &::gfx::sprites::PLAYER_WALK1 : &::gfx::sprites::PLAYER_WALK2));
                 actualPlayerFrame = playerFrame;
@@ -515,14 +608,6 @@ namespace game {
             fire.compose(composedFire);
             lcd_p->createChar(gfx::CHAR_FIRE, composedFire);
         }
-
-        void presentAndSwap() {
-            frame_p->presentDifferential(lcd_p, backPtr);
-
-            gfx::Frame* tmp = frame_p;
-            frame_p = backPtr;
-            backPtr = tmp;
-        }
     };
 
 }
@@ -531,7 +616,8 @@ namespace game {
 
 bool lagging = false; // Időtúllépéses-e az előző frame.
 
-game::Game gameInst(&lcd);
+Scene* scene;
+Buttons lastHeldButtons;
 
 
 void setup() {
@@ -554,19 +640,29 @@ void setup() {
 
     DEBUG_LOG_CAPTIONED("Frame length: ", MILLIS_PER_FRAME);
     nextFrameDue = millis() + MILLIS_PER_FRAME;
+
+    //scene = new game::Game();
+    scene = new gfx::CharViewer();
+    scene->resume(&lcd);
 }
 
 void loop() {
-    bool up = (digitalRead(PIN_BUTTON_UP) == LOW);
-    bool down = (digitalRead(PIN_BUTTON_DOWN) == LOW);
-    bool right = (digitalRead(PIN_BUTTON_RIGHT) == LOW);
+    // Bemenet
+    Buttons heldNow {
+        .up = (digitalRead(PIN_BUTTON_UP) == LOW),
+        .down = (digitalRead(PIN_BUTTON_DOWN) == LOW),
+        .right = (digitalRead(PIN_BUTTON_RIGHT) == LOW)
+    };
 
-    gameInst.setButtons(up, down, right);
+    scene->setInputs(heldNow, !lastHeldButtons && heldNow, lastHeldButtons && !heldNow);
 
-    gameInst.process();
+    lastHeldButtons = heldNow;
+
+
+    scene->process();
     // Ha időhiányban szenvedünk, akkor átugorjuk a kirajzolást, mert ez jelentős időbe telik, és "nem hat" a játékmenetre.
     if(!lagging) {
-        gameInst.draw();
+        scene->draw(&lcd);
     }
 
     // Kitaláljuk, mennyit kell várni a következő frame elejéig
