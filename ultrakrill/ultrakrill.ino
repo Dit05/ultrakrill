@@ -74,8 +74,12 @@ DEBUG_PRINTLN(val);
 #endif
 
 
-const int PANIC_FRAME_INDEX_OUT_OF_RANGE = 1;
-const int PANIC_LAG = 2;
+const byte PANIC_FRAME_INDEX_OUT_OF_RANGE = 1;
+const byte PANIC_VECTOR_INDEX_OUT_OF_RANGE = 2;
+const byte PANIC_VECTOR_FULL = 3;
+const byte PANIC_VECTOR_EMPTY = 4;
+const byte PANIC_LAG = 5;
+const byte PANIC_INVALID_ENUM = 6;
 
 
 // Végtelen ciklusban villogja le a megadott `code`-ot.
@@ -108,6 +112,49 @@ void panic(byte code, const char* msg) {
     Serial.println(msg);
     panic(code);
 }
+
+
+
+// Hacky generikus vektor
+#define GENERIC_VECTOR_DECL(T_NAME, T_TYPE, T_CAP) class T_NAME {\
+    public:\
+        static const byte CAPACITY = T_CAP;\
+\
+        byte size() const { return size_m; }\
+        T_TYPE* operator [](byte index) {\
+            checkBounds(index);\
+            return &buffer[index];\
+        }\
+\
+        void removeAt(byte index) {\
+            checkBounds(index);\
+\
+            size_m--;\
+            for(int i = index; i < size_m; i++) {\
+                buffer[i] = buffer[i + 1];\
+            }\
+        }\
+\
+        void push(::T_TYPE elem) {\
+            if(size_m >= T_CAP) panic(PANIC_VECTOR_FULL);\
+            buffer[size_m] = elem;\
+            size_m++;\
+        }\
+\
+        ::T_TYPE pop() {\
+            if(size_m <= 0) panic(PANIC_VECTOR_EMPTY);\
+            size_m--;\
+            return buffer[size_m];\
+        }\
+\
+    private:\
+        byte size_m = 0;\
+        T_TYPE buffer[T_CAP] {};\
+\
+        void checkBounds(byte index) const {\
+            if(index < 0 || index >= size_m) panic(PANIC_VECTOR_INDEX_OUT_OF_RANGE);\
+        }\
+};
 
 
 struct Buttons {
@@ -482,12 +529,52 @@ namespace gfx {
 
 namespace game {
 
+    struct Entity {
+        byte posX;
+        byte posY;
+    };
+
+    struct Shot : public Entity {
+        Shot() {}
+        Shot(byte posX, byte posY) {
+            this->posX = posX;
+            this->posY = posY;
+        }
+    };
+    GENERIC_VECTOR_DECL(Vec_Shot_32, game::Shot, 32)
+
+
+    enum ObstacleKind {
+        OBSTACLE_CRACKED_WALL,
+        OBSTACLE_WALL,
+        OBSTACLE_FIRE
+    };
+
+    struct Obstacle : public Entity {
+        ObstacleKind kind;
+
+        Obstacle() {}
+        Obstacle(byte posX, byte posY, ObstacleKind kind) {
+            this->posX = posX;
+            this->posY = posY;
+            this->kind = kind;
+        }
+    };
+    GENERIC_VECTOR_DECL(Vec_Obstacle_32, game::Obstacle, 32);
+
+
     class Game : public Scene {
 
     public:
 
         Game() {
             bufferB.clear();
+
+            // HACK
+            obstacles.push(Obstacle(4, 1, OBSTACLE_FIRE));
+            obstacles.push(Obstacle(5, 1, OBSTACLE_FIRE));
+            obstacles.push(Obstacle(6, 1, OBSTACLE_WALL));
+            shots.push(Shot(5, 1));
         }
 
 
@@ -519,27 +606,24 @@ namespace game {
             if(buttonsHeld.down) delay(15);
             if(buttonsHeld.right) delay(15);
 
-            *frame_p->index(0, LCD_HEIGHT - 1) = ::gfx::CHAR_PLAYER;
-            *frame_p->index(4, LCD_HEIGHT - 1) = ::gfx::CHAR_FIRE;
-            *frame_p->index(5, LCD_HEIGHT - 1) = ::gfx::CHAR_WALL;
-            *frame_p->index(6, LCD_HEIGHT - 1) = ::gfx::CHAR_WALL_CRACKED;
-            *frame_p->index(7, LCD_HEIGHT - 1) = ::gfx::CHAR_FILTH;
-            *frame_p->index(8, LCD_HEIGHT - 1) = ::gfx::CHAR_IMP;
-
+            // Entitások
             if(frameNumber % 2 == 0) {
-                *frame_p->index(4, LCD_HEIGHT - 1) = '*';
+                drawObstacles(frame_p);
+                drawShots(frame_p);
+            } else {
+                drawShots(frame_p);
+                drawObstacles(frame_p);
             }
-            *frame_p->index(2, LCD_HEIGHT - 1) = '*';
 
             // HUD
             *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
             *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = '?';
 
-            // Present
+            // Prezentálás
             setCustomChars(lcd_p);
             frame_p->presentDifferential(lcd_p, backPtr);
 
-            // Swap buffers
+            // Bufferek felcsereberélése
             gfx::Frame* tmp = frame_p;
             frame_p = backPtr;
             backPtr = tmp;
@@ -596,6 +680,10 @@ namespace game {
 
         byte frameNumber = 0; // drawenként nő
 
+        Vec_Shot_32 shots {};
+        Vec_Obstacle_32 obstacles {};
+
+
         void setCustomChars(::LiquidCrystal* lcd_p) {
             if(actualPlayerFrame != playerFrame) {
                 lcd_p->createChar(::gfx::CHAR_PLAYER, (byte*)(playerFrame ? &::gfx::sprites::PLAYER_WALK1 : &::gfx::sprites::PLAYER_WALK2));
@@ -613,6 +701,30 @@ namespace game {
             byte composedFire[CHAR_HEIGHT];
             fire.compose(composedFire);
             lcd_p->createChar(gfx::CHAR_FIRE, composedFire);
+        }
+
+        void drawShots(::gfx::Frame* frame_p) {
+            for(int i = 0; i < shots.size(); i++) {
+                Shot* ent = shots[i];
+
+                *frame_p->index(ent->posX, ent->posY) = '*';
+            }
+        }
+
+        void drawObstacles(::gfx::Frame* frame_p) {
+            for(int i = 0; i < obstacles.size(); i++) {
+                Obstacle* ent = obstacles[i];
+
+                char ch;
+                switch(ent->kind) {
+                    case OBSTACLE_CRACKED_WALL: ch = ::gfx::CHAR_WALL_CRACKED; break;
+                    case OBSTACLE_WALL: ch = ::gfx::CHAR_WALL; break;
+                    case OBSTACLE_FIRE: ch = ::gfx::CHAR_FIRE; break;
+                    default: panic(PANIC_INVALID_ENUM);
+                }
+
+                *frame_p->index(ent->posX, ent->posY) = ch;
+            }
         }
     };
 
