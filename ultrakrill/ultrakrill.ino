@@ -1,6 +1,5 @@
 #ifndef LCD_EMULATOR
 #include <LiquidCrystal.h>
-#include <EEPROM.h>
 #endif
 
 // Tinkercad caveatek listája:
@@ -11,6 +10,7 @@
 // - Nincs reference!!!
 // - Csak akkor értelmezi a classban a struct paraméteres metódust, ha fully qualified az útvonala, tehát NEM JÓ a LiquidCrystal, ::LiquidCrystal kell.
 // - A virtual method csak úgy parsolódik helyesen, ha {} helyett = 0;.
+// - invalid header file = nem is invalid, csak van valami egyéb hiba amit nem mond el, és includeolva van az EEPROM.h.
 
 // Konfigurációs DEFINEok
 #define CONF_DEBUG_LOGGING 1
@@ -537,19 +537,22 @@ namespace game {
     };
 
     struct Shot : public Entity {
+        byte damage;
+
         Shot() {}
-        Shot(byte posX, byte posY) {
+        Shot(byte posX, byte posY, byte damage) {
             this->posX = posX;
             this->posY = posY;
+            this->damage = damage;
         }
     };
     GENERIC_VECTOR_DECL(Vec_Shot_32, game::Shot, 32)
 
 
     enum ObstacleKind : byte {
-        OBSTACLE_CRACKED_WALL,
-        OBSTACLE_WALL,
-        OBSTACLE_FIRE
+        OBSTACLE_CRACKED_WALL = 0,
+        OBSTACLE_WALL = 1,
+        OBSTACLE_FIRE = 2
     };
 
     struct Obstacle : public Entity {
@@ -601,6 +604,7 @@ namespace game {
 
 
     enum BlockmapFlags : byte {
+        BLOCKMAP_NOTHING = 0,
         BLOCKMAP_WALL = 1,
         BLOCKMAP_FIRE = 2,
         BLOCKMAP_ENEMY = 4,
@@ -619,7 +623,7 @@ namespace game {
             obstacles.push(Obstacle(4, 1, OBSTACLE_FIRE));
             obstacles.push(Obstacle(5, 1, OBSTACLE_FIRE));
             obstacles.push(Obstacle(6, 1, OBSTACLE_WALL));
-            shots.push(Shot(5, 1));
+            shots.push(Shot(12, 1, 1));
         }
 
 
@@ -640,6 +644,9 @@ namespace game {
             if(animationTimer % 5 == 0) playerFrame = (playerFrame + 1) % 2;
             if(animationTimer % 10 == 0) filthFrame = (filthFrame + 1) % 2;
             if(animationTimer % 10 == 0) impFrame = (impFrame + 1) % 2;
+
+
+            updateBlockmap();
 
             fire.advancePhase();
 
@@ -806,9 +813,40 @@ namespace game {
                 if(ent->posX == playerX() && ent->posY == playerY()) {
                     hitPlayer(4);
                 }
+
+                hitObstacleAt(ent->posX, ent->posY, &ent->damage);
+                if(ent->damage <= 0) {
+                    shots.removeAt(i);
+                    continue;
+                }
             }
         }
 
+
+        bool hitObstacleAt(byte x, byte y, byte* damage) {
+            if(*damage <= 0) return false;
+            if((getBlockmap(x, y) | BLOCKMAP_WALL) == 0) return false;
+
+            for(byte i = obstacles.size() - 1; i >= 0; i--) {
+                Obstacle* ent = obstacles[i];
+                if(ent->posX != x || ent->posY != y) continue;
+
+                while(*damage --> 0) {
+                    switch(ent->kind) {
+                        case OBSTACLE_WALL:
+                            ent->kind = OBSTACLE_CRACKED_WALL;
+                            break;
+                        case OBSTACLE_CRACKED_WALL:
+                            obstacles.removeAt(i);
+                            continue;
+
+                        default: continue;
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
 
         void drawObstacles(::gfx::Frame* frame_p) {
             for(byte i = 0; i < obstacles.size(); i++) {
