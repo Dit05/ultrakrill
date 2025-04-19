@@ -1,5 +1,6 @@
 #ifndef LCD_EMULATOR
 #include <LiquidCrystal.h>
+#include <EEPROM.h>
 #endif
 
 // Tinkercad caveatek listája:
@@ -80,6 +81,7 @@ const byte PANIC_VECTOR_FULL = 3;
 const byte PANIC_VECTOR_EMPTY = 4;
 const byte PANIC_LAG = 5;
 const byte PANIC_INVALID_ENUM = 6;
+const byte PANIC_BLOCKMAP_INDEX_OUT_OF_RANGE = 7;
 
 
 // Végtelen ciklusban villogja le a megadott `code`-ot.
@@ -544,7 +546,7 @@ namespace game {
     GENERIC_VECTOR_DECL(Vec_Shot_32, game::Shot, 32)
 
 
-    enum ObstacleKind {
+    enum ObstacleKind : byte {
         OBSTACLE_CRACKED_WALL,
         OBSTACLE_WALL,
         OBSTACLE_FIRE
@@ -561,6 +563,49 @@ namespace game {
         }
     };
     GENERIC_VECTOR_DECL(Vec_Obstacle_32, game::Obstacle, 32);
+
+
+    class Layer {
+
+    public:
+        Layer(unsigned int length, byte framesPerStep, const char* name) {
+            this->length_m = length;
+            this->framesPerStep_m = framesPerStep;
+            this->name_m = name;
+        }
+
+
+        unsigned int length() { return length_m; }
+        byte framesPerStep() { return framesPerStep_m; }
+        const char* name() { return name_m; }
+
+    private:
+        unsigned int length_m;
+        byte framesPerStep_m;
+        const char* name_m;
+
+    };
+
+    const int LAYER_COUNT = 9;
+    const Layer LAYERS[] {
+        Layer(100, 18, "Limbo"),
+        Layer(100, 16, "Lust"),
+        Layer(100, 14, "Gluttony"),
+        Layer(100, 12, "Greed"),
+        Layer(100, 10, "Wrath"),
+        Layer(100, 8, "Heresy"),
+        Layer(100, 6, "Violence"),
+        Layer(100, 4, "Fraud"),
+        Layer(0xffff, 2, "Treachery")
+    }; // A leghosszabb név 9 betű. A frames per step legyen páros, hogy a shotok tudjanak a felénél lépni.
+
+
+    enum BlockmapFlags : byte {
+        BLOCKMAP_WALL = 1,
+        BLOCKMAP_FIRE = 2,
+        BLOCKMAP_ENEMY = 4,
+        BLOCKMAP_SHOT = 8
+    };
 
 
     class Game : public Scene {
@@ -597,6 +642,12 @@ namespace game {
             if(animationTimer % 10 == 0) impFrame = (impFrame + 1) % 2;
 
             fire.advancePhase();
+
+            stepTimer++;
+            if(stepTimer >= layer_p->framesPerStep()) {
+            } else if(stepTimer == layer_p->framesPerStep() / 2) {
+                stepShots();
+            }
         }
 
         void draw(::LiquidCrystal* lcd_p) {
@@ -638,6 +689,8 @@ namespace game {
             lcd_p->createChar(gfx::CHAR_WALL_CRACKED, (byte*)gfx::sprites::WALL_CRACKED);
 
             actualPlayerFrame = 255;
+            actualFilthFrame = 255;
+            actualImpFrame = 255;
             setCustomChars(lcd_p);
         }
 
@@ -680,6 +733,14 @@ namespace game {
 
         byte frameNumber = 0; // drawenként nő
 
+
+        ::game::Layer* layer_p;
+
+        byte stepTimer = 0;
+
+        bool playerJumping = false;
+
+        BlockmapFlags blockmap[LCD_WIDTH * LCD_HEIGHT];
         Vec_Shot_32 shots {};
         Vec_Obstacle_32 obstacles {};
 
@@ -703,16 +764,54 @@ namespace game {
             lcd_p->createChar(gfx::CHAR_FIRE, composedFire);
         }
 
+
+        void updateBlockmap() {
+            memset(blockmap, 0, sizeof(blockmap));
+        }
+
+        BlockmapFlags getBlockmap(byte x, byte y) {
+#if CONF_PANIC_BOUNDS
+            if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) panic(PANIC_BLOCKMAP_INDEX_OUT_OF_RANGE);
+#endif
+            return blockmap[(y * LCD_WIDTH) + x];
+        }
+
+
+        byte playerX() const { return 0; }
+        byte playerY() const { return playerJumping ? 0 : 1; }
+
+        void hitPlayer(byte unscaledDamage) {
+            // TODO
+        }
+
+
         void drawShots(::gfx::Frame* frame_p) {
-            for(int i = 0; i < shots.size(); i++) {
+            for(byte i = 0; i < shots.size(); i++) {
                 Shot* ent = shots[i];
 
                 *frame_p->index(ent->posX, ent->posY) = '*';
             }
         }
 
+        void stepShots() {
+            for(byte i = shots.size() - 1; i >= 0; i--) {
+                Shot* ent = shots[i];
+
+                if(ent->posX <= 0) {
+                    shots.removeAt(i);
+                    continue;
+                }
+
+                ent->posX--;
+                if(ent->posX == playerX() && ent->posY == playerY()) {
+                    hitPlayer(4);
+                }
+            }
+        }
+
+
         void drawObstacles(::gfx::Frame* frame_p) {
-            for(int i = 0; i < obstacles.size(); i++) {
+            for(byte i = 0; i < obstacles.size(); i++) {
                 Obstacle* ent = obstacles[i];
 
                 char ch;
