@@ -11,6 +11,7 @@
 // - Csak akkor értelmezi a classban a struct paraméteres metódust, ha fully qualified az útvonala, tehát NEM JÓ a LiquidCrystal, ::LiquidCrystal kell.
 // - A virtual method csak úgy parsolódik helyesen, ha {} helyett = 0;.
 // - invalid header file = nem is invalid, csak van valami egyéb hiba amit nem mond el, és includeolva van az EEPROM.h.
+// TODO a valóságban változik az LCD, ha csak custom characterek definíciói változtak, de nem volt semmi write?
 
 // Konfigurációs DEFINEok
 #define CONF_DEBUG_LOGGING 1
@@ -44,6 +45,7 @@ const byte CHAR_HEIGHT = 8;
 const int FRAMERATE = 25;
 const unsigned long MILLIS_PER_FRAME = 1000ul / FRAMERATE;
 unsigned long nextFrameDue;
+bool lagging = false; // Időtúllépéses-e az előző frame.
 
 // Debug
 #if CONF_DEBUG_LOGGING == 1
@@ -88,6 +90,10 @@ const byte PANIC_BLOCKMAP_INDEX_OUT_OF_RANGE = 7;
 void panic(byte code) {
     Serial.print("Panic code: ");
     Serial.println(code);
+
+#ifdef LCD_EMULATOR
+    *(int*)0 = 149; // DAP Breakpoint
+#endif
 
     const int BIT_TIME = 1000;
 
@@ -159,6 +165,74 @@ void panic(byte code, const char* msg) {
 };
 
 
+// https://en.wikipedia.org/wiki/Linear-feedback_shift_register nyomán
+class Random {
+
+public:
+    Random(uint16_t startState) {
+        if(startState == 0) startState++;
+        lfsr = startState;
+    }
+
+    bool nextBit() {
+        return advance();
+    }
+
+    byte nextByte() {
+        byte val = 0;
+        for(byte i = 0; i < 8; i++) val |= ((byte)nextBit() << i);
+        return val;
+    }
+
+    byte nextByte(byte maxExcl) {
+        if(maxExcl <= 0) return 0;
+
+        while(true) {
+            byte val = 0;
+            for(byte i = 0; i < width(maxExcl); i++) val |= ((byte)nextBit() << i);
+            if(val < maxExcl) return val;
+        }
+    }
+
+    uint16_t nextShort() {
+        uint16_t val = 0;
+        for(byte i = 0; i < 16; i++) val |= ((uint16_t)nextBit() << i);
+        return val;
+    }
+
+    uint32_t nextLong() {
+        uint32_t val = 0;
+        for(byte i = 0; i < 32; i++) val |= ((uint32_t)nextBit() << i);
+        return val;
+    }
+
+private:
+    uint16_t lfsr;
+
+    bool advance() {
+        // Csapok: 16, 14, 13, 11 (köszönöm Wikipédia, nagyon menő)
+        uint16_t bit = ((lfsr >> 0) ^ (lfsr >> 2) ^ (lfsr >> 3) ^ (lfsr >> 5)) & 1u;
+        lfsr = (lfsr >> 1) | (bit << 15);
+        return bit;
+    }
+
+    static byte width(uint8_t val) {
+        byte log = 0;
+        while(val > 0) { log++; val >>= 1; }
+        return log;
+    }
+    static byte width(uint16_t val) {
+        byte log = 0;
+        while(val > 0) { log++; val >>= 1; }
+        return log;
+    }
+    static byte width(uint32_t val) {
+        byte log = 0;
+        while(val > 0) { log++; val >>= 1; }
+        return log;
+    }
+};
+
 struct Buttons {
     bool up;
     bool down;
@@ -213,14 +287,15 @@ namespace gfx {
 
     const char* HEX_DIGITS = "0123456789ABCDEF";
 
-    const byte CHAR_FIRE = 0; // Procedural fire
-    const byte CHAR_PLAYER = 1; // Animated player character
-    const byte CHAR_WALL = 2; // Pristine wall
-    const byte CHAR_WALL_CRACKED = 3; // Damaged wall
-    const byte CHAR_HEALTH = 4; // Procedural health bar
+    const byte CHAR_FIRE = 0; // Procedural fire.
+    const byte CHAR_PLAYER = 1; // Animated player character.
+    const byte CHAR_WALL = 2; // Pristine wall.
+    const byte CHAR_WALL_CRACKED = 3; // Damaged wall.
+    const byte CHAR_HEALTH = 4; // Procedural health bar.
     const byte CHAR_FILTH = 5; // Animated character for the ground enemy.
     const byte CHAR_IMP = 6; // Animated character for the flying-shooting enemy.
     const byte CHAR_UNUSED7 = 7;
+    const byte CHAR_PARRY = '#'; // Overlay when parrying.
 
 
     class Fire {
@@ -228,8 +303,14 @@ namespace gfx {
     public:
 
         Fire() {
-            fillMask(mask1);
-            fillMask(mask2);
+            ::Random rand(149);
+            fillMask(&rand, mask1);
+            fillMask(&rand, mask2);
+        }
+
+        Fire(::Random* rand_p) {
+            fillMask(rand_p, mask1);
+            fillMask(rand_p, mask2);
         }
 
         void compose(byte dest[8 /* CHAR_HEIGHT */]) {
@@ -282,11 +363,11 @@ namespace gfx {
             return row;
         }
 
-        void fillMask(byte mask[8 /* CHAR_HEIGHT, csak a Tinkercad valamiért nem szereti */]) {
+        void fillMask(::Random* rand_p, byte mask[8]) {
             for(size_t i = 0; i < CHAR_HEIGHT; i++) {
                 byte row = 0;
                 for(int j = 0; j < i + 1; j++) {
-                    row |= (0b1 << random(CHAR_WIDTH));
+                    row |= (0b1 << rand_p->nextByte(CHAR_WIDTH));
                 }
                 mask[i] = row;
             }
@@ -537,13 +618,15 @@ namespace game {
     };
 
     struct Shot : public Entity {
-        byte damage;
+        bool friendly;
+        bool explosive;
 
         Shot() {}
-        Shot(byte posX, byte posY, byte damage) {
+        Shot(byte posX, byte posY, bool friendly, bool explosive) {
             this->posX = posX;
             this->posY = posY;
-            this->damage = damage;
+            this->friendly = friendly;
+            this->explosive = explosive;
         }
     };
     GENERIC_VECTOR_DECL(Vec_Shot_32, game::Shot, 32)
@@ -578,9 +661,9 @@ namespace game {
         }
 
 
-        unsigned int length() { return length_m; }
-        byte framesPerStep() { return framesPerStep_m; }
-        const char* name() { return name_m; }
+        unsigned int length() const { return length_m; }
+        byte framesPerStep() const { return framesPerStep_m; }
+        const char* name() const { return name_m; }
 
     private:
         unsigned int length_m;
@@ -590,15 +673,15 @@ namespace game {
     };
 
     const int LAYER_COUNT = 9;
-    const Layer LAYERS[] {
-        Layer(100, 18, "Limbo"),
+    const Layer LAYERS[LAYER_COUNT] {
+        Layer(90, 18, "Limbo"),
         Layer(100, 16, "Lust"),
-        Layer(100, 14, "Gluttony"),
-        Layer(100, 12, "Greed"),
-        Layer(100, 10, "Wrath"),
-        Layer(100, 8, "Heresy"),
-        Layer(100, 6, "Violence"),
-        Layer(100, 4, "Fraud"),
+        Layer(200, 14, "Gluttony"),
+        Layer(400, 12, "Greed"),
+        Layer(800, 10, "Wrath"),
+        Layer(1600, 8, "Heresy"),
+        Layer(3200, 6, "Violence"),
+        Layer(4800, 4, "Fraud"),
         Layer(0xffff, 2, "Treachery")
     }; // A leghosszabb név 9 betű. A frames per step legyen páros, hogy a shotok tudjanak a felénél lépni.
 
@@ -619,11 +702,15 @@ namespace game {
         Game() {
             bufferB.clear();
 
+            layer_p = &LAYERS[0];
+
             // HACK
             obstacles.push(Obstacle(4, 1, OBSTACLE_FIRE));
             obstacles.push(Obstacle(5, 1, OBSTACLE_FIRE));
             obstacles.push(Obstacle(6, 1, OBSTACLE_WALL));
-            shots.push(Shot(12, 1, 1));
+            shots.push(Shot(12, 1, false, false));
+            shots.push(Shot(13, 1, false, false));
+            shots.push(Shot(14, 1, false, false));
         }
 
 
@@ -640,19 +727,27 @@ namespace game {
         }
 
         void process() {
+            // Input
+            playerJumping = buttonsHeld.up;
+            if(playerJumping) playerFrame = 0;
+            if(buttonsPressed.right) {
+                shots.push(Shot(playerX() + 1, playerY(), true, false));
+            }
+
+            // Animációk
             animationTimer++;
-            if(animationTimer % 5 == 0) playerFrame = (playerFrame + 1) % 2;
             if(animationTimer % 10 == 0) filthFrame = (filthFrame + 1) % 2;
             if(animationTimer % 10 == 0) impFrame = (impFrame + 1) % 2;
-
-
-            updateBlockmap();
-
             fire.advancePhase();
+
+            // Blockmap
+            updateBlockmap();
 
             stepTimer++;
             if(stepTimer >= layer_p->framesPerStep()) {
-            } else if(stepTimer == layer_p->framesPerStep() / 2) {
+                stepTimer = 0;
+                if(!playerJumping) playerFrame = (playerFrame + 1) % 2;
+            } else if(stepTimer == (layer_p->framesPerStep() / 2)) {
                 stepShots();
             }
         }
@@ -660,18 +755,15 @@ namespace game {
         void draw(::LiquidCrystal* lcd_p) {
             frame_p->clear();
 
-            if(buttonsHeld.up) delay(15);
-            if(buttonsHeld.down) delay(15);
-            if(buttonsHeld.right) delay(15);
-
             // Entitások
-            if(frameNumber % 2 == 0) {
+            if(frameNumber % 2 == 0) { // Genuis!
                 drawObstacles(frame_p);
                 drawShots(frame_p);
             } else {
                 drawShots(frame_p);
                 drawObstacles(frame_p);
             }
+            drawPlayer(frame_p);
 
             // HUD
             *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
@@ -728,7 +820,7 @@ namespace game {
         Buttons buttonsPressed = {};
         Buttons buttonsReleased = {};
 
-        gfx::Fire fire = {};
+        gfx::Fire fire {};
 
         byte animationTimer = 0; // processenként nő
         byte playerFrame = 0;
@@ -741,7 +833,7 @@ namespace game {
         byte frameNumber = 0; // drawenként nő
 
 
-        ::game::Layer* layer_p;
+        const ::game::Layer* layer_p;
 
         byte stepTimer = 0;
 
@@ -776,7 +868,7 @@ namespace game {
             memset(blockmap, 0, sizeof(blockmap));
         }
 
-        BlockmapFlags getBlockmap(byte x, byte y) {
+        ::game::BlockmapFlags getBlockmap(byte x, byte y) {
 #if CONF_PANIC_BOUNDS
             if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) panic(PANIC_BLOCKMAP_INDEX_OUT_OF_RANGE);
 #endif
@@ -788,7 +880,12 @@ namespace game {
         byte playerY() const { return playerJumping ? 0 : 1; }
 
         void hitPlayer(byte unscaledDamage) {
+            DEBUG_LOG("Ouch!");
             // TODO
+        }
+
+        void drawPlayer(::gfx::Frame* frame_p) {
+            *frame_p->index(playerX(), playerY()) = ::gfx::CHAR_PLAYER;
         }
 
 
@@ -801,21 +898,31 @@ namespace game {
         }
 
         void stepShots() {
-            for(byte i = shots.size() - 1; i >= 0; i--) {
+            byte i = shots.size();
+            while(i > 0) {
+                i--;
                 Shot* ent = shots[i];
 
-                if(ent->posX <= 0) {
-                    shots.removeAt(i);
-                    continue;
+                if(ent->friendly) {
+                    if(ent->posX >= LCD_WIDTH - 1) {
+                        shots.removeAt(i);
+                        continue;
+                    }
+
+                    ent->posX++;
+                } else {
+                    if(ent->posX <= 0) {
+                        shots.removeAt(i);
+                        continue;
+                    }
+
+                    ent->posX--;
+                    if(ent->posX == playerX() && ent->posY == playerY()) {
+                        hitPlayer(4);
+                    }
                 }
 
-                ent->posX--;
-                if(ent->posX == playerX() && ent->posY == playerY()) {
-                    hitPlayer(4);
-                }
-
-                hitObstacleAt(ent->posX, ent->posY, &ent->damage);
-                if(ent->damage <= 0) {
+                if(hitObstacleAt(ent->posX, ent->posY)) {
                     shots.removeAt(i);
                     continue;
                 }
@@ -823,29 +930,30 @@ namespace game {
         }
 
 
-        bool hitObstacleAt(byte x, byte y, byte* damage) {
-            if(*damage <= 0) return false;
+        bool hitObstacleAt(byte x, byte y) {
             if((getBlockmap(x, y) | BLOCKMAP_WALL) == 0) return false;
 
-            for(byte i = obstacles.size() - 1; i >= 0; i--) {
-                Obstacle* ent = obstacles[i];
-                if(ent->posX != x || ent->posY != y) continue;
-
-                while(*damage --> 0) {
-                    switch(ent->kind) {
-                        case OBSTACLE_WALL:
-                            ent->kind = OBSTACLE_CRACKED_WALL;
-                            break;
-                        case OBSTACLE_CRACKED_WALL:
-                            obstacles.removeAt(i);
-                            continue;
-
-                        default: continue;
-                    }
-                }
-                return true;
+            Obstacle* ent = NULL;
+            byte i;
+            for(i = 0; i < obstacles.size(); i++) {
+                Obstacle* here = obstacles[i];
+                if(here->posX != x || here->posY != y) continue;
+                ent = here;
+                break;
             }
-            return false;
+
+            if(ent == NULL) return false;
+
+            switch(ent->kind) {
+                case OBSTACLE_WALL:
+                    ent->kind = OBSTACLE_CRACKED_WALL;
+                    return true;
+                case OBSTACLE_CRACKED_WALL:
+                    obstacles.removeAt(i);
+                    return true;
+
+                default: return false;
+            }
         }
 
         void drawObstacles(::gfx::Frame* frame_p) {
@@ -869,7 +977,6 @@ namespace game {
 
 
 
-bool lagging = false; // Időtúllépéses-e az előző frame.
 
 Scene* scene;
 Buttons lastHeldButtons;
