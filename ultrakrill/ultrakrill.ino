@@ -164,6 +164,19 @@ void panic(byte code, const char* msg) {
         }\
 };
 
+typedef int TYPE;
+
+class List {
+private:
+    int capacity_m;
+    TYPE* ptr_m;
+
+    void resize(int newCapacity) {
+        // TODO
+    }
+
+};
+
 
 // https://en.wikipedia.org/wiki/Linear-feedback_shift_register nyomán
 class Random {
@@ -631,6 +644,14 @@ namespace game {
     };
     GENERIC_VECTOR_DECL(Vec_Shot_32, game::Shot, 32)
 
+    struct Filth : public Entity {
+    };
+    GENERIC_VECTOR_DECL(Vec_Filth_16, game::Filth, 16)
+
+    struct Imp : public Entity {
+    };
+    GENERIC_VECTOR_DECL(Vec_Imp_16, game::Imp, 16)
+
 
     enum ObstacleKind : byte {
         OBSTACLE_CRACKED_WALL = 0,
@@ -649,6 +670,129 @@ namespace game {
         }
     };
     GENERIC_VECTOR_DECL(Vec_Obstacle_32, game::Obstacle, 32);
+
+
+    enum TileEntity : byte {
+        TILE_ENTITY_FIRE = 0,
+        TILE_ENTITY_CRACKED_WALL = 1,
+        TILE_ENTITY_WALL = 2,
+        TILE_ENTITY_CRACKED_WALL_OR_WALL = 3,
+        TILE_ENTITY_CRACKED_WALL_OR_FIRE = 4,
+        TILE_ENTITY_FILTH = 5,
+        TILE_ENTITY_IMP = 6,
+        TILE_ENTITY_IMP_OR_FILTH = 7
+    };
+
+    // 0: lent vagy fent
+    // 1-3: mi
+    //  0: tűz
+    //  1: repedt fal
+    //  2: teljes fal
+    //  3: repedt/teljes fal (véletlen)
+    //  4: repedt fal/tűz (véletlen)
+    //  5: filth
+    //  6: imp
+    //  7: imp/filth (véletlen)
+    // 4-6: kurzor mozgatások száma (0-7)
+    // 7: opcionális-e (100% helyett csak 50% eséllyel tevődik le)
+    class Tile {
+
+    public:
+        static const byte TOP_INDEX = 0;
+        static const byte WHAT_OFFSET = 1;
+        static const byte WHAT_LEN = 3;
+        static const byte MOVES_OFFSET = 4;
+        static const byte MOVES_LEN = 3;
+        static const byte OPTIONAL_INDEX = 7;
+
+        bool isTop() const { return getBit(TOP_INDEX); }
+        TileEntity getWhat() const { return (TileEntity)getField(WHAT_OFFSET, WHAT_LEN); }
+        byte getMoves() const { return getField(MOVES_OFFSET, MOVES_LEN); }
+        bool getOptional() const { return getBit(OPTIONAL_INDEX); }
+
+        // 1 kurzormozgatásos opcionálatlan tűz lent.
+        constexpr Tile() : data(MOVES_OFFSET) { /* do nothing, különben nem "compile-time constant" */ }
+
+        // Csak haladóknak ajánlott ez a konstruktor!
+        constexpr Tile(byte data) : data(data) { /* do nothing */ }
+
+
+        constexpr ::game::Tile bottom() const { withBit(TOP_INDEX, false); return *this; }
+        constexpr ::game::Tile top() const { withBit(TOP_INDEX, true); return *this; }
+
+        constexpr ::game::Tile what(TileEntity what) const { withField(WHAT_OFFSET, WHAT_LEN, what); return *this; }
+
+        constexpr ::game::Tile moves(byte moves) const { withField(MOVES_OFFSET, MOVES_LEN, moves); return *this; }
+
+        constexpr ::game::Tile mandatory() const { withBit(OPTIONAL_INDEX, false); return *this; }
+        constexpr ::game::Tile optional() const { withBit(OPTIONAL_INDEX, true); return *this; }
+
+
+    private:
+        byte data;
+
+        constexpr bool getBit(byte index) const {
+            return (data & (1 << index)) > 0;
+        }
+
+        constexpr byte getField(byte offset, byte len) const {
+            return (data >> offset) & (0xff >> (8 - len));
+        }
+
+        constexpr ::game::Tile withBit(byte index, bool val) const {
+            byte newData = data;
+            byte mask = 1 << index;
+            newData &= ~mask;
+            if(val) newData |= mask;
+            return Tile(newData);
+        }
+
+        constexpr ::game::Tile withField(byte offset, byte len, byte val) const {
+            byte newData = data;
+            byte mask = 0xff >> (8 - len);
+            newData &= ~(mask << offset);
+            newData |= (val & mask) << offset;
+            return Tile(newData);
+        }
+
+    };
+
+    struct Pattern {
+        byte tileCount;
+        Tile* tiles;
+    };
+
+
+    class PatternArray {
+    public:
+        void add(char* top, char* bottom) {
+            // TODO
+        }
+    };
+
+
+    ::game::PatternArray createDefaultPatterns() {
+        PatternArray patterns;
+
+        // W: tűz
+        // X: teljes fal
+        // Y: repedt fal
+        // Z: repedt/teljes fal (véletlen)
+        // V: repedt fal/tűz (véletlen)
+        // F: filth
+        // I: imp
+        // E: imp/filth (véletlen)
+        // kisbetű: opcionális
+        patterns.add("     ",
+                     "ZWWWZ");
+
+        patterns.add("Y",
+                     "Z");
+        patterns.add("Z",
+                     "Y");
+
+        return patterns;
+    };
 
 
     class Layer {
