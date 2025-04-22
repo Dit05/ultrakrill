@@ -78,12 +78,13 @@ DEBUG_PRINTLN(val);
 
 
 const byte PANIC_FRAME_INDEX_OUT_OF_RANGE = 1;
-const byte PANIC_VECTOR_INDEX_OUT_OF_RANGE = 2;
-const byte PANIC_VECTOR_FULL = 3;
-const byte PANIC_VECTOR_EMPTY = 4;
+const byte PANIC_COLLECTION_INDEX_OUT_OF_RANGE = 2;
+const byte PANIC_COLLECTION_FULL = 3;
+const byte PANIC_COLLECTION_EMPTY = 4;
 const byte PANIC_LAG = 5;
 const byte PANIC_INVALID_ENUM = 6;
 const byte PANIC_BLOCKMAP_INDEX_OUT_OF_RANGE = 7;
+const byte PANIC_ALLOCATION_FAILED = 8;
 
 
 // Végtelen ciklusban villogja le a megadott `code`-ot.
@@ -125,60 +126,136 @@ void panic(byte code, const char* msg) {
 
 // Hacky generikus vektor
 #define GENERIC_VECTOR_DECL(T_NAME, T_TYPE, T_CAP) class T_NAME {\
-    public:\
-        static const byte CAPACITY = T_CAP;\
+public:\
+    static const byte CAPACITY = T_CAP;\
 \
-        byte size() const { return size_m; }\
-        T_TYPE* operator [](byte index) {\
-            checkBounds(index);\
-            return &buffer[index];\
+    byte size() const { return size_m; }\
+    T_TYPE* operator [](byte index) {\
+        checkBounds(index);\
+        return &((T_TYPE*)buffer)[index];\
+    }\
+\
+    void removeAt(byte index) {\
+        checkBounds(index);\
+\
+        size_m--;\
+        for(int i = index; i < size_m; i++) {\
+            ((T_TYPE*)buffer)[i] = ((T_TYPE*)buffer)[i + 1];\
         }\
+    }\
 \
-        void removeAt(byte index) {\
-            checkBounds(index);\
+    void push(::T_TYPE elem) {\
+        if(size_m >= T_CAP) panic(PANIC_COLLECTION_FULL);\
+        ((T_TYPE*)buffer)[size_m] = elem;\
+        size_m++;\
+    }\
 \
-            size_m--;\
-            for(int i = index; i < size_m; i++) {\
-                buffer[i] = buffer[i + 1];\
-            }\
-        }\
+    ::T_TYPE pop() {\
+        if(size_m <= 0) panic(PANIC_COLLECTION_EMPTY);\
+        size_m--;\
+        return ((T_TYPE*)buffer)[size_m];\
+    }\
 \
-        void push(::T_TYPE elem) {\
-            if(size_m >= T_CAP) panic(PANIC_VECTOR_FULL);\
-            buffer[size_m] = elem;\
-            size_m++;\
-        }\
+private:\
+    byte size_m = 0;\
+    byte buffer[T_CAP * sizeof(T_TYPE)] {};\
 \
-        ::T_TYPE pop() {\
-            if(size_m <= 0) panic(PANIC_VECTOR_EMPTY);\
-            size_m--;\
-            return buffer[size_m];\
-        }\
-\
-    private:\
-        byte size_m = 0;\
-        T_TYPE buffer[T_CAP] {};\
-\
-        void checkBounds(byte index) const {\
-            if(index < 0 || index >= size_m) panic(PANIC_VECTOR_INDEX_OUT_OF_RANGE);\
-        }\
-};
-
-typedef int TYPE;
-
-class List {
-private:
-    int capacity_m;
-    TYPE* ptr_m;
-
-    void resize(int newCapacity) {
-        // TODO
-    }
-
+    void checkBounds(byte index) const {\
+        if(index < 0 || index >= size_m) panic(PANIC_COLLECTION_INDEX_OUT_OF_RANGE);\
+    }\
 };
 
 
-// https://en.wikipedia.org/wiki/Linear-feedback_shift_register nyomán
+#define GENERIC_LIST_DECL(T_NAME, T_TYPE) class T_NAME {\
+\
+public:\
+    unsigned int capacity() const { return capacity_m; }\
+    unsigned int size() const { return size_m; }\
+    ::T_TYPE* rawPtr() { return ptr_m; }\
+\
+\
+    T_NAME(unsigned int capacity) {\
+        capacity_m = 0;\
+        size_m = 0;\
+        ptr_m = NULL;\
+        resize(capacity);\
+    }\
+\
+    T_NAME() {\
+        capacity_m = 0;\
+        size_m = 0;\
+        ptr_m = NULL;\
+        resize(4);\
+    }\
+\
+\
+    void resize(unsigned int newCapacity) {\
+        T_TYPE* old_ptr = ptr_m;\
+\
+        ptr_m = (T_TYPE*)operator new[](newCapacity);\
+        if(ptr_m == NULL) {\
+            ptr_m = old_ptr;\
+            panic(PANIC_ALLOCATION_FAILED, "List");\
+            return;\
+        }\
+\
+        memcpy(ptr_m, old_ptr, sizeof(T_TYPE) * min(capacity_m, newCapacity));\
+        capacity_m = newCapacity;\
+        delete[] old_ptr;\
+    }\
+\
+    void reserve(unsigned int capacity) {\
+        unsigned int newCap = capacity_m;\
+        while(newCap < capacity) newCap *= 2;\
+        if(newCap != capacity_m) resize(newCap);\
+    }\
+\
+    void shrinkToFit() {\
+        resize(size_m);\
+    }\
+\
+\
+    T_TYPE* operator[](unsigned int index) {\
+        checkBounds(index);\
+        return &ptr_m[index];\
+    }\
+\
+\
+    void push(::T_TYPE elem) {\
+        if(size_m >= capacity_m) resize(capacity_m * 2);\
+        ptr_m[size_m++] = elem;\
+    }\
+\
+    ::T_TYPE pop() {\
+        if(size_m <= 0) panic(PANIC_COLLECTION_EMPTY, "");\
+        return ptr_m[--size_m];\
+    }\
+\
+    void removeAt(byte index) {\
+        checkBounds(index);\
+\
+        size_m--;\
+        for(int i = index; i < size_m; i++) {\
+            ptr_m[i] = ptr_m[i + 1];\
+        }\
+    }\
+\
+\
+private:\
+    unsigned int capacity_m;\
+    unsigned int size_m;\
+    T_TYPE* ptr_m;\
+\
+    void checkBounds(unsigned int index) const {\
+        if(index < 0 || index >= size_m) panic(PANIC_COLLECTION_INDEX_OUT_OF_RANGE);\
+    }\
+\
+};
+
+GENERIC_LIST_DECL(List_byte, byte);
+
+
+// https://en.wikipedia.org/wiki/Linear-feedback_shift_register nyomán.
 class Random {
 
 public:
@@ -706,9 +783,9 @@ namespace game {
         static const byte OPTIONAL_INDEX = 7;
 
         bool isTop() const { return getBit(TOP_INDEX); }
-        TileEntity getWhat() const { return (TileEntity)getField(WHAT_OFFSET, WHAT_LEN); }
+        game::TileEntity getWhat() const { return (TileEntity)getField(WHAT_OFFSET, WHAT_LEN); }
         byte getMoves() const { return getField(MOVES_OFFSET, MOVES_LEN); }
-        bool getOptional() const { return getBit(OPTIONAL_INDEX); }
+        bool isOptional() const { return getBit(OPTIONAL_INDEX); }
 
         // 1 kurzormozgatásos opcionálatlan tűz lent.
         constexpr Tile() : data(MOVES_OFFSET) { /* do nothing, különben nem "compile-time constant" */ }
@@ -717,15 +794,40 @@ namespace game {
         constexpr Tile(byte data) : data(data) { /* do nothing */ }
 
 
-        constexpr ::game::Tile bottom() const { withBit(TOP_INDEX, false); return *this; }
-        constexpr ::game::Tile top() const { withBit(TOP_INDEX, true); return *this; }
+        ::game::Tile bottom() const { return withBit(TOP_INDEX, false); }
+        ::game::Tile top() const { return withBit(TOP_INDEX, true); }
 
-        constexpr ::game::Tile what(TileEntity what) const { withField(WHAT_OFFSET, WHAT_LEN, what); return *this; }
+        ::game::Tile what(game::TileEntity what) const { return withField(WHAT_OFFSET, WHAT_LEN, what); }
 
-        constexpr ::game::Tile moves(byte moves) const { withField(MOVES_OFFSET, MOVES_LEN, moves); return *this; }
+        ::game::Tile moves(byte moves) const { return withField(MOVES_OFFSET, MOVES_LEN, moves); }
 
-        constexpr ::game::Tile mandatory() const { withBit(OPTIONAL_INDEX, false); return *this; }
-        constexpr ::game::Tile optional() const { withBit(OPTIONAL_INDEX, true); return *this; }
+        ::game::Tile mandatory() const { return withBit(OPTIONAL_INDEX, false); }
+        ::game::Tile optional() const { return withBit(OPTIONAL_INDEX, true); }
+
+        String toString() {
+            String str {};
+
+            if(isOptional()) str += "optional ";
+            if(isTop()) str += "top ";
+            else str += "bottom ";
+
+            switch(getWhat()) {
+                case TILE_ENTITY_FIRE: str += "fire"; break;
+                case TILE_ENTITY_CRACKED_WALL: str += "cracked wall"; break;
+                case TILE_ENTITY_WALL: str += "wall"; break;
+                case TILE_ENTITY_CRACKED_WALL_OR_WALL: str += "cracked/regular wall"; break;
+                case TILE_ENTITY_CRACKED_WALL_OR_FIRE: str += "cracked wall/fire"; break;
+                case TILE_ENTITY_FILTH: str += "filth"; break;
+                case TILE_ENTITY_IMP: str += "imp"; break;
+                case TILE_ENTITY_IMP_OR_FILTH: str += "imp/filth"; break;
+                default: str += "invalid value"; break;
+            }
+
+            str += ", moves: ";
+            str += getMoves();
+
+            return str;
+        }
 
 
     private:
@@ -739,7 +841,7 @@ namespace game {
             return (data >> offset) & (0xff >> (8 - len));
         }
 
-        constexpr ::game::Tile withBit(byte index, bool val) const {
+        ::game::Tile withBit(byte index, bool val) const {
             byte newData = data;
             byte mask = 1 << index;
             newData &= ~mask;
@@ -747,7 +849,7 @@ namespace game {
             return Tile(newData);
         }
 
-        constexpr ::game::Tile withField(byte offset, byte len, byte val) const {
+        ::game::Tile withField(byte offset, byte len, byte val) const {
             byte newData = data;
             byte mask = 0xff >> (8 - len);
             newData &= ~(mask << offset);
@@ -756,6 +858,7 @@ namespace game {
         }
 
     };
+    GENERIC_LIST_DECL(List_Tile, game::Tile);
 
     struct Pattern {
         byte tileCount;
@@ -765,9 +868,85 @@ namespace game {
 
     class PatternArray {
     public:
-        void add(char* top, char* bottom) {
-            // TODO
+        void add(const char* top_p, const char* bottom_p) {
+            offsets.push(tiles.size());
+            while(*top_p != '\0' && *bottom_p != '\0') {
+                if(*top_p != ' ') {
+                    Tile top = decodeTile(*top_p).top();
+
+                    if(*bottom_p == ' ') top = top.moves(untilNextColumn(top_p, bottom_p));
+                    tiles.push(top);
+                }
+                if(*bottom_p != ' ') {
+                    Tile bottom = decodeTile(*bottom_p).bottom().moves(untilNextColumn(top_p, bottom_p));
+                    tiles.push(bottom);
+                }
+
+                top_p++;
+                bottom_p++;
+            }
         }
+
+        game::TileEntity decodeEntity(char ch) {
+            switch(ch) {
+                case 'w': case 'W': return TILE_ENTITY_FIRE;
+                case 'x': case 'X': return TILE_ENTITY_WALL;
+                case 'y': case 'Y': return TILE_ENTITY_CRACKED_WALL;
+                case 'z': case 'Z': return TILE_ENTITY_CRACKED_WALL_OR_WALL;
+                case 'v': case 'V': return TILE_ENTITY_CRACKED_WALL_OR_FIRE;
+                case 'f': case 'F': return TILE_ENTITY_FILTH;
+                case 'i': case 'I': return TILE_ENTITY_IMP;
+                case 'e': case 'E': return TILE_ENTITY_IMP_OR_FILTH;
+                default:
+                    String str {};
+                    str += "Invalid TileEntity: ";
+                    str += ch;
+                    panic(PANIC_INVALID_ENUM, str.c_str());
+            }
+        }
+
+        bool isOptional(char ch) {
+            return isLowerCase(ch);
+        }
+
+        game::Tile decodeTile(char ch) {
+            Tile tile = Tile().what(decodeEntity(ch));
+            if(isOptional(ch)) tile = tile.optional();
+            return tile;
+        }
+
+
+        unsigned int size() { return offsets.size(); }
+        game::Pattern get(unsigned int index) {
+#if CONF_PANIC_BOUNDS
+            if(index >= size()) panic(PANIC_COLLECTION_INDEX_OUT_OF_RANGE);
+#endif
+            Pattern pat;
+            pat.tiles = &tiles.rawPtr()[*offsets[index]];
+            pat.tileCount = ((index >= size() - 1) ? size() : (unsigned int)*offsets[index + 1]) - (unsigned int)*offsets[index]; // Különbség ezen- és a következő offset közt = count.
+            return pat;
+        }
+
+    private:
+        List_Tile tiles {}; // Az összes tile egyben.
+        List_byte offsets {}; // Melyik pattern hol kezdődik.
+
+        static byte untilNextColumn(const char* top_p, const char* bottom_p) {
+            byte count = 0;
+            do {
+                count++;
+                top_p++; bottom_p++;
+            } while(*top_p != ' ' && *top_p != '\0' && *bottom_p != ' ' && *bottom_p != '\0');
+            return count;
+        }
+
+        /*static byte countNonSpaces(char* ptr) {
+            byte count = 0;
+            while(*ptr++ != '\0') {
+                if(*ptr != ' ') count++;
+            }
+            return count;
+        }*/
     };
 
 
@@ -1130,6 +1309,20 @@ void setup() {
     Serial.begin(9600);
     lcd.begin(LCD_WIDTH, LCD_HEIGHT);
     DEBUG_LOG("LCD began");
+
+    // HACK
+    game::PatternArray patterns = game::createDefaultPatterns();
+    for(unsigned int i = 0; i < patterns.size(); i++) {
+        Serial.print("#");
+        Serial.print(i);
+        Serial.println(": ");
+
+        game::Pattern pat = patterns.get(i);
+        for(byte j = 0; j < pat.tileCount; j++) {
+            Serial.println(pat.tiles[j].toString().c_str());
+        }
+    }
+
 
     pinMode(PIN_BUTTON_UP, INPUT_PULLUP);
     pinMode(PIN_BUTTON_DOWN, INPUT_PULLUP);

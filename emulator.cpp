@@ -201,6 +201,13 @@ struct HardwareSerial {
         std::cout << (int)b;
         std::cout << '\n';
     }
+    static void print(const unsigned int b) {
+        std::cout << b;
+    }
+    static void println(const unsigned int b) {
+        std::cout << b;
+        std::cout << '\n';
+    }
     static void print(const unsigned long b) {
         std::cout << b;
     }
@@ -257,6 +264,8 @@ typedef unsigned char byte;
 #define INPUT 0
 #define OUTPUT 1
 #define INPUT_PULLUP 2
+#define min std::min
+#define isLowerCase(x) (tolower(x) == x)
 HardwareSerial Serial;
 #include "ultrakrill/ultrakrill.ino"
 #undef LCD_EMULATOR
