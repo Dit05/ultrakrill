@@ -265,6 +265,7 @@ typedef unsigned char byte;
 #define OUTPUT 1
 #define INPUT_PULLUP 2
 #define min std::min
+#define max std::max
 #define isLowerCase(x) (tolower(x) == x)
 HardwareSerial Serial;
 #include "ultrakrill/ultrakrill.ino"

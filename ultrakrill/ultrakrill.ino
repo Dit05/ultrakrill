@@ -927,6 +927,19 @@ namespace game {
             return pat;
         }
 
+        void printToSerial() {
+            for(unsigned int i = 0; i < size(); i++) {
+                Serial.print("#");
+                Serial.print(i);
+                Serial.println(": ");
+
+                game::Pattern pat = get(i);
+                for(byte j = 0; j < pat.tileCount; j++) {
+                    Serial.println(pat.tiles[j].toString().c_str());
+                }
+            }
+        }
+
     private:
         List_Tile tiles {}; // Az összes tile egyben.
         List_byte offsets {}; // Melyik pattern hol kezdődik.
@@ -951,6 +964,7 @@ namespace game {
 
 
     ::game::PatternArray createDefaultPatterns() {
+        // Itt van minden, hogy a string literálok hátha nem szennyezik a RAM-ot statikus változóként.
         PatternArray patterns;
 
         // W: tűz
@@ -997,15 +1011,15 @@ namespace game {
 
     const int LAYER_COUNT = 9;
     const Layer LAYERS[LAYER_COUNT] {
-        Layer(90, 18, "Limbo"),
-        Layer(100, 16, "Lust"),
-        Layer(200, 14, "Gluttony"),
-        Layer(400, 12, "Greed"),
-        Layer(800, 10, "Wrath"),
-        Layer(1600, 8, "Heresy"),
-        Layer(3200, 6, "Violence"),
-        Layer(4800, 4, "Fraud"),
-        Layer(0xffff, 2, "Treachery")
+        Layer(90, 18, "LIMBO"),
+        Layer(100, 16, "LUST"),
+        Layer(200, 14, "GLUTTONY"),
+        Layer(400, 12, "GREED"),
+        Layer(800, 10, "WRATH"),
+        Layer(1600, 8, "HERESY"),
+        Layer(3200, 6, "VIOLENCE"),
+        Layer(4800, 4, "FRAUD"),
+        Layer(0xffff, 2, "TREACHERY")
     }; // A leghosszabb név 9 betű. A frames per step legyen páros, hogy a shotok tudjanak a felénél lépni.
 
 
@@ -1025,7 +1039,7 @@ namespace game {
         Game() {
             bufferB.clear();
 
-            layer_p = &LAYERS[0];
+            switchLayer(0);
 
             // HACK
             obstacles.push(Obstacle(4, 1, OBSTACLE_FIRE));
@@ -1088,9 +1102,7 @@ namespace game {
             }
             drawPlayer(frame_p);
 
-            // HUD
-            *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
-            *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = '?';
+            drawHud(frame_p);
 
             // Prezentálás
             setCustomChars(lcd_p);
@@ -1116,11 +1128,19 @@ namespace game {
             setCustomChars(lcd_p);
         }
 
+        void showBanner(String msg) {
+            banner = msg;
+            bannerScroll = 0;
+        }
+
     private:
         gfx::Frame bufferA;
         gfx::Frame bufferB;
         gfx::Frame* frame_p = &bufferA;
         gfx::Frame* backPtr = &bufferB;
+
+        String banner {};
+        unsigned int bannerScroll = 0;
 
         // Ezt töltögetjük majd fel annyira, hogy az életerőt mutassa.
         byte healthChar[CHAR_HEIGHT] = {
@@ -1157,6 +1177,7 @@ namespace game {
 
 
         const ::game::Layer* layer_p;
+        byte layerNumber = 0;
 
         byte stepTimer = 0;
 
@@ -1191,6 +1212,17 @@ namespace game {
             memset(blockmap, 0, sizeof(blockmap));
         }
 
+        void switchLayer(byte num) {
+            layerNumber = num;
+            layer_p = &LAYERS[num];
+
+            String msg("LAYER ");
+            msg += num;
+            msg += ": ";
+            msg += layer_p->name();
+            showBanner(msg);
+        }
+
         ::game::BlockmapFlags getBlockmap(byte x, byte y) {
 #if CONF_PANIC_BOUNDS
             if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) panic(PANIC_BLOCKMAP_INDEX_OUT_OF_RANGE);
@@ -1199,12 +1231,37 @@ namespace game {
         }
 
 
+        void drawHud(::gfx::Frame* frame_p) {
+            // Élet
+            *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
+            // Réteg
+            *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = "0123456789"[layerNumber];
+
+            // Banner
+            if((frameNumber % 3 == 0) && banner.length() > 0) {
+                int posX = LCD_WIDTH - 1 - bannerScroll;
+                unsigned int i = max(0, -posX);
+                byte x = max(0, posX);
+                while(x < LCD_WIDTH - 1 && i < banner.length()) {
+                    *frame_p->index(x, 0) = banner[i];
+                    i++;
+                    x++;
+                }
+
+                bannerScroll++;
+                if(bannerScroll >= banner.length() + LCD_WIDTH) {
+                    banner = String {};
+                }
+            }
+        }
+
+
         byte playerX() const { return 0; }
         byte playerY() const { return playerJumping ? 0 : 1; }
 
         void hitPlayer(byte unscaledDamage) {
-            DEBUG_LOG("Ouch!");
             // TODO
+            showBanner(String("Ouch!"));
         }
 
         void drawPlayer(::gfx::Frame* frame_p) {
@@ -1309,20 +1366,6 @@ void setup() {
     Serial.begin(9600);
     lcd.begin(LCD_WIDTH, LCD_HEIGHT);
     DEBUG_LOG("LCD began");
-
-    // HACK
-    game::PatternArray patterns = game::createDefaultPatterns();
-    for(unsigned int i = 0; i < patterns.size(); i++) {
-        Serial.print("#");
-        Serial.print(i);
-        Serial.println(": ");
-
-        game::Pattern pat = patterns.get(i);
-        for(byte j = 0; j < pat.tileCount; j++) {
-            Serial.println(pat.tiles[j].toString().c_str());
-        }
-    }
-
 
     pinMode(PIN_BUTTON_UP, INPUT_PULLUP);
     pinMode(PIN_BUTTON_DOWN, INPUT_PULLUP);
