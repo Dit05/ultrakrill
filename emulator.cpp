@@ -217,19 +217,22 @@ struct HardwareSerial {
     }
 };
 
-/*class String {
+class String {
 
     public:
-        String operator +=(char* text) {
+        String() : str() { /* do nothing */ }
+        String(const char* s) : str(s) { /* do nothing */ }
+
+        String operator +=(const char* text) {
             str += text;
             return *this;
         }
         String operator +=(char ch) {
-            str += ch;
+            str += std::to_string(ch);
             return *this;
         }
         String operator +=(int n) {
-            str += n;
+            str += std::to_string(n);
             return *this;
         }
 
@@ -237,10 +240,17 @@ struct HardwareSerial {
             return str.c_str();
         }
 
+        unsigned int length() const {
+            return str.length();
+        }
+
+        char operator[](unsigned int index) const {
+            return str[index];
+        }
+
     private:
         std::string str;
-};*/
-typedef std::string String;
+};
 
 unsigned long millis() {
     return SDL_GetTicks();

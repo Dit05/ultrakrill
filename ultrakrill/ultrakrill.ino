@@ -163,7 +163,7 @@ private:\
     void checkBounds(byte index) const {\
         if(index < 0 || index >= size_m) panic(PANIC_COLLECTION_INDEX_OUT_OF_RANGE);\
     }\
-};
+}
 
 
 #define GENERIC_LIST_DECL(T_NAME, T_TYPE) class T_NAME {\
@@ -171,7 +171,7 @@ private:\
 public:\
     unsigned int capacity() const { return capacity_m; }\
     unsigned int size() const { return size_m; }\
-    ::T_TYPE* rawPtr() { return ptr_m; }\
+    ::T_TYPE* rawPtr() const { return ptr_m; }\
 \
 \
     T_NAME(unsigned int capacity) {\
@@ -215,7 +215,7 @@ public:\
     }\
 \
 \
-    T_TYPE* operator[](unsigned int index) {\
+    T_TYPE* operator[](unsigned int index) const {\
         checkBounds(index);\
         return &ptr_m[index];\
     }\
@@ -242,17 +242,19 @@ public:\
 \
 \
 private:\
+    T_TYPE* ptr_m;\
     unsigned int capacity_m;\
     unsigned int size_m;\
-    T_TYPE* ptr_m;\
 \
     void checkBounds(unsigned int index) const {\
         if(index < 0 || index >= size_m) panic(PANIC_COLLECTION_INDEX_OUT_OF_RANGE);\
     }\
 \
-};
+}
 
 GENERIC_LIST_DECL(List_byte, byte);
+typedef unsigned int typedef_unsigned_int; // Egy szónak kell lennie, mert a `::unsigned int` az syntax error lenne.
+GENERIC_LIST_DECL(List_uint, typedef_unsigned_int);
 
 
 // https://en.wikipedia.org/wiki/Linear-feedback_shift_register nyomán.
@@ -264,17 +266,21 @@ public:
         lfsr = startState;
     }
 
+    void warmup(unsigned int steps) {
+        while(steps --> 0) nextBit();
+    }
+
     bool nextBit() {
         return advance();
     }
 
-    byte nextByte() {
+    byte nextUint8() {
         byte val = 0;
         for(byte i = 0; i < 8; i++) val |= ((byte)nextBit() << i);
         return val;
     }
 
-    byte nextByte(byte maxExcl) {
+    byte nextUint8(byte maxExcl) {
         if(maxExcl <= 0) return 0;
 
         while(true) {
@@ -284,16 +290,36 @@ public:
         }
     }
 
-    uint16_t nextShort() {
+    uint16_t nextUint16() {
         uint16_t val = 0;
         for(byte i = 0; i < 16; i++) val |= ((uint16_t)nextBit() << i);
         return val;
     }
 
-    uint32_t nextLong() {
+    uint16_t nextUint16(uint16_t maxExcl) {
+        if(maxExcl <= 0) return 0;
+
+        while(true) {
+            uint16_t val = 0;
+            for(byte i = 0; i < width(maxExcl); i++) val |= ((byte)nextBit() << i);
+            if(val < maxExcl) return val;
+        }
+    }
+
+    uint32_t nextUint32() {
         uint32_t val = 0;
         for(byte i = 0; i < 32; i++) val |= ((uint32_t)nextBit() << i);
         return val;
+    }
+
+    uint32_t nextUint32(uint32_t maxExcl) {
+        if(maxExcl <= 0) return 0;
+
+        while(true) {
+            uint32_t val = 0;
+            for(byte i = 0; i < width(maxExcl); i++) val |= ((byte)nextBit() << i);
+            if(val < maxExcl) return val;
+        }
     }
 
 private:
@@ -380,12 +406,11 @@ namespace gfx {
     const byte CHAR_FIRE = 0; // Procedural fire.
     const byte CHAR_PLAYER = 1; // Animated player character.
     const byte CHAR_WALL = 2; // Pristine wall.
-    const byte CHAR_WALL_CRACKED = 3; // Damaged wall.
+    const byte CHAR_CRACKED_WALL = 3; // Damaged wall.
     const byte CHAR_HEALTH = 4; // Procedural health bar.
     const byte CHAR_FILTH = 5; // Animated character for the ground enemy.
     const byte CHAR_IMP = 6; // Animated character for the flying-shooting enemy.
-    const byte CHAR_UNUSED7 = 7;
-    const byte CHAR_PARRY = '#'; // Overlay when parrying.
+    const byte CHAR_OVERLAY = 7; // Character for full-screen overlay.
 
 
     class Fire {
@@ -457,7 +482,7 @@ namespace gfx {
             for(size_t i = 0; i < CHAR_HEIGHT; i++) {
                 byte row = 0;
                 for(int j = 0; j < i + 1; j++) {
-                    row |= (0b1 << rand_p->nextByte(CHAR_WIDTH));
+                    row |= (0b1 << rand_p->nextUint8(CHAR_WIDTH));
                 }
                 mask[i] = row;
             }
@@ -478,7 +503,7 @@ namespace gfx {
             0b11111
         };
 
-        const byte WALL_CRACKED[CHAR_HEIGHT] = {
+        const byte CRACKED_WALL[CHAR_HEIGHT] = {
             0b01101,
             0b10110,
             0b01010,
@@ -577,6 +602,52 @@ namespace gfx {
             0b01100
         };
 
+        const byte FLASH0[CHAR_HEIGHT] = {
+            0b10001,
+            0b00100,
+            0b10001,
+            0b00100,
+            0b10001,
+            0b00100,
+            0b10001,
+            0b00100
+        };
+
+        const byte FLASH1[CHAR_HEIGHT] = {
+            0b10101,
+            0b01010,
+            0b10101,
+            0b01010,
+            0b10101,
+            0b01010,
+            0b10101,
+            0b01010
+        };
+
+        const byte FLASH2[CHAR_HEIGHT] = {
+            0b11011,
+            0b01110,
+            0b11011,
+            0b01110,
+            0b11011,
+            0b01110,
+            0b11011,
+            0b01110
+        };
+
+        const byte FLASH3[CHAR_HEIGHT] = {
+            0b11111,
+            0b11111,
+            0b11111,
+            0b11111,
+            0b11111,
+            0b11111,
+            0b11111,
+            0b11111
+        };
+
+        const byte FLASH_FRAMES = 4;
+
         /*
         const byte TEMPLATE[CHAR_HEIGHT] = {
             0b00000,
@@ -619,9 +690,9 @@ namespace gfx {
 
         // Kirajzolja ezt a framet az egész LCD tartalmának felülírásával.
         void present(::LiquidCrystal* lcd_p) {
-            for(int y = 0; y < LCD_HEIGHT; y++) {
+            for(byte y = 0; y < LCD_HEIGHT; y++) {
                 lcd_p->setCursor(0, y);
-                for(int x = 0; x < LCD_WIDTH; x++) {
+                for(byte x = 0; x < LCD_WIDTH; x++) {
                     lcd_p->write(*index(x, y));
                 }
             }
@@ -629,21 +700,25 @@ namespace gfx {
 
         // Kirajzolja ezt a Framet egy már fentlévőre.
         void presentDifferential(::LiquidCrystal* lcd_p, gfx::Frame* last_p) {
-            int differences = 0; // Vajon a compiler csinál ebből byte-t?
-            for(int y = 0; y < LCD_HEIGHT; y++) {
-                for(int x = 0; x < LCD_WIDTH; x++) {
+            unsigned int differences = 0;
+            for(byte y = 0; y < LCD_HEIGHT; y++) {
+                for(byte x = 0; x < LCD_WIDTH; x++) {
                     if(*this->index(x, y) != *last_p->index(x, y)) differences++;
                 }
             }
 
-            // Legalább a fele különbözik?
-            if(differences * 2 >= LCD_WIDTH * LCD_HEIGHT) {
+            if(differences == 0) {
+                // Ha nem változik semmi, akkor is legyen valami, nehogy ne updateljen az LCD.
+                lcd_p->setCursor(0, 0);
+                lcd_p->write(*this->index(0, 0));
+            } else if(differences * 2 >= LCD_WIDTH * LCD_HEIGHT) {
+                // Legalább a fele különbözik
                 this->present(lcd_p); // Akkor csak present-eld simán.
             } else {
                 // Kevés különbség, mehetünk esetenként.
-                for(int y = 0; y < LCD_HEIGHT; y++) {
+                for(byte y = 0; y < LCD_HEIGHT; y++) {
                     bool streak = false; // A setCursor kihagyható, ha egymás mellett van a két módosítandó.
-                    for(int x = 0; x < LCD_WIDTH; x++) {
+                    for(byte x = 0; x < LCD_WIDTH; x++) {
                         byte here = *this->index(x, y);
                         if(here != *last_p->index(x, y)) {
                             if(!streak) lcd_p->setCursor(x, y);
@@ -711,7 +786,6 @@ namespace game {
         bool friendly;
         bool explosive;
 
-        Shot() {}
         Shot(byte posX, byte posY, bool friendly, bool explosive) {
             this->posX = posX;
             this->posY = posY;
@@ -719,15 +793,23 @@ namespace game {
             this->explosive = explosive;
         }
     };
-    GENERIC_VECTOR_DECL(Vec_Shot_32, game::Shot, 32)
+    GENERIC_VECTOR_DECL(Vec_Shot_48, game::Shot, 48);
 
     struct Filth : public Entity {
+        Filth(byte posX, byte posY) {
+            this->posX = posX;
+            this->posY = posY;
+        }
     };
-    GENERIC_VECTOR_DECL(Vec_Filth_16, game::Filth, 16)
+    GENERIC_VECTOR_DECL(Vec_Filth_32, game::Filth, 32);
 
     struct Imp : public Entity {
+        Imp(byte posX, byte posY) {
+            this->posX = posX;
+            this->posY = posY;
+        }
     };
-    GENERIC_VECTOR_DECL(Vec_Imp_16, game::Imp, 16)
+    GENERIC_VECTOR_DECL(Vec_Imp_32, game::Imp, 32);
 
 
     enum ObstacleKind : byte {
@@ -887,6 +969,10 @@ namespace game {
             }
         }
 
+        void mark() {
+            marks.push(offsets.size());
+        }
+
         game::TileEntity decodeEntity(char ch) {
             switch(ch) {
                 case 'w': case 'W': return TILE_ENTITY_FIRE;
@@ -916,15 +1002,17 @@ namespace game {
         }
 
 
-        unsigned int size() { return offsets.size(); }
-        game::Pattern get(unsigned int index) {
-#if CONF_PANIC_BOUNDS
-            if(index >= size()) panic(PANIC_COLLECTION_INDEX_OUT_OF_RANGE);
-#endif
+        unsigned int size() const { return offsets.size(); }
+        game::Pattern get(unsigned int index) const {
             Pattern pat;
-            pat.tiles = &tiles.rawPtr()[*offsets[index]];
+            pat.tiles = tiles[*offsets[index]];
             pat.tileCount = ((index >= size() - 1) ? size() : (unsigned int)*offsets[index + 1]) - (unsigned int)*offsets[index]; // Különbség ezen- és a következő offset közt = count.
             return pat;
+        }
+
+        unsigned int markCount() const { return marks.size(); }
+        unsigned int getMark(unsigned int index) const {
+            return *marks[index];
         }
 
         void printToSerial() {
@@ -943,6 +1031,7 @@ namespace game {
     private:
         List_Tile tiles {}; // Az összes tile egyben.
         List_byte offsets {}; // Melyik pattern hol kezdődik.
+        List_uint marks {}; // Melyik kategória hol kezdődik.
 
         static byte untilNextColumn(const char* top_p, const char* bottom_p) {
             byte count = 0;
@@ -983,6 +1072,17 @@ namespace game {
                      "Z");
         patterns.add("Z",
                      "Y");
+        patterns.add("y",
+                     "y");
+
+        patterns.add(" ",
+                     "E");
+
+        patterns.mark();
+
+        patterns.add(" x ",
+                     "Eee");
+
 
         return patterns;
     };
@@ -991,44 +1091,53 @@ namespace game {
     class Layer {
 
     public:
-        Layer(unsigned int length, byte framesPerStep, const char* name) {
+        Layer(unsigned int length, byte framesPerStep, const char* name, byte minPause, byte maxPause) {
             this->length_m = length;
             this->framesPerStep_m = framesPerStep;
             this->name_m = name;
+            this->minPause_m = minPause;
+            this->maxPause_m = maxPause;
         }
 
 
         unsigned int length() const { return length_m; }
         byte framesPerStep() const { return framesPerStep_m; }
         const char* name() const { return name_m; }
+        byte minPause() const { return minPause_m; }
+        byte maxPause() const { return maxPause_m; }
 
     private:
         unsigned int length_m;
         byte framesPerStep_m;
+        byte minPause_m;
+        byte maxPause_m;
         const char* name_m;
 
     };
 
     const int LAYER_COUNT = 9;
     const Layer LAYERS[LAYER_COUNT] {
-        Layer(90, 18, "LIMBO"),
-        Layer(100, 16, "LUST"),
-        Layer(200, 14, "GLUTTONY"),
-        Layer(400, 12, "GREED"),
-        Layer(800, 10, "WRATH"),
-        Layer(1600, 8, "HERESY"),
-        Layer(3200, 6, "VIOLENCE"),
-        Layer(4800, 4, "FRAUD"),
-        Layer(0xffff, 2, "TREACHERY")
+        Layer(90, 18, "LIMBO", 6, 10),
+        Layer(100, 16, "LUST", 3, 8),
+        Layer(200, 14, "GLUTTONY", 2, 7),
+        Layer(400, 12, "GREED", 2, 6),
+        Layer(800, 10, "WRATH", 1, 6),
+        Layer(1600, 8, "HERESY", 1, 5),
+        Layer(3200, 6, "VIOLENCE", 1, 4),
+        Layer(4800, 4, "FRAUD", 0, 4),
+        Layer(0xffff, 2, "TREACHERY", 0, 3)
     }; // A leghosszabb név 9 betű. A frames per step legyen páros, hogy a shotok tudjanak a felénél lépni.
 
 
     enum BlockmapFlags : byte {
-        BLOCKMAP_NOTHING = 0,
         BLOCKMAP_WALL = 1,
         BLOCKMAP_FIRE = 2,
-        BLOCKMAP_ENEMY = 4,
-        BLOCKMAP_SHOT = 8
+        BLOCKMAP_FILTH = 4,
+        BLOCKMAP_IMP = 8,
+
+        BLOCKMAP_NOTHING = 0,
+        BLOCKMAP_ENEMY = BLOCKMAP_FILTH | BLOCKMAP_IMP,
+        BLOCKMAP_ALL = 16 - 1
     };
 
 
@@ -1036,18 +1145,12 @@ namespace game {
 
     public:
 
-        Game() {
+        Game(uint16_t seed) : levelRandom(seed) {
             bufferB.clear();
+            levelRandom.warmup(20); // "Bemelegítés: 20 fekvőtámasz"
 
             switchLayer(0);
-
-            // HACK
-            obstacles.push(Obstacle(4, 1, OBSTACLE_FIRE));
-            obstacles.push(Obstacle(5, 1, OBSTACLE_FIRE));
-            obstacles.push(Obstacle(6, 1, OBSTACLE_WALL));
-            shots.push(Shot(12, 1, false, false));
-            shots.push(Shot(13, 1, false, false));
-            shots.push(Shot(14, 1, false, false));
+            patternPause = 0;
         }
 
 
@@ -1064,28 +1167,21 @@ namespace game {
         }
 
         void process() {
-            // Input
-            playerJumping = buttonsHeld.up;
-            if(playerJumping) playerFrame = 0;
-            if(buttonsPressed.right) {
-                shots.push(Shot(playerX() + 1, playerY(), true, false));
-            }
+            processPlayer();
 
             // Animációk
             animationTimer++;
-            if(animationTimer % 10 == 0) filthFrame = (filthFrame + 1) % 2;
-            if(animationTimer % 10 == 0) impFrame = (impFrame + 1) % 2;
             fire.advancePhase();
 
-            // Blockmap
+            // Blockmap (OPTIMIZE: nem minden processkor updatel, csak ha kell)
             updateBlockmap();
 
             stepTimer++;
             if(stepTimer >= layer_p->framesPerStep()) {
                 stepTimer = 0;
-                if(!playerJumping) playerFrame = (playerFrame + 1) % 2;
+                stepAllway();
             } else if(stepTimer == (layer_p->framesPerStep() / 2)) {
-                stepShots();
+                stepHalfway();
             }
         }
 
@@ -1100,9 +1196,29 @@ namespace game {
                 drawShots(frame_p);
                 drawObstacles(frame_p);
             }
+
             drawPlayer(frame_p);
+            drawFilths(frame_p);
+            drawImps(frame_p);
+
+            if(flashDuration > 0 && frameNumber % 2 != 0) {
+                overlayFrame = (2 * flashProgress * ::gfx::sprites::FLASH_FRAMES) / flashDuration;
+                if(overlayFrame >= ::gfx::sprites::FLASH_FRAMES) overlayFrame = (2 * ::gfx::sprites::FLASH_FRAMES) - overlayFrame - 1;
+
+                drawOverlay(frame_p);
+                if(flashProgress++ >= flashDuration) {
+                    flashProgress = 0;
+                    flashDuration = 0;
+                }
+            }
 
             drawHud(frame_p);
+
+            /*for(byte y = 0; y < LCD_HEIGHT; y++) {
+                for(byte x = 0; x < LCD_WIDTH; x++) {
+                    *frame_p->index(x, y) = ((getBlockmap(x, y) & BLOCKMAP_WALL) > 0) ? 'w' : ' ';
+                }
+            }*/
 
             // Prezentálás
             setCustomChars(lcd_p);
@@ -1120,11 +1236,12 @@ namespace game {
         void initializeCustomChars(::LiquidCrystal* lcd_p) {
             // A const sajnos elcastolandó, mert a LiquidCrystal hülye.
             lcd_p->createChar(gfx::CHAR_WALL, (byte*)gfx::sprites::WALL);
-            lcd_p->createChar(gfx::CHAR_WALL_CRACKED, (byte*)gfx::sprites::WALL_CRACKED);
+            lcd_p->createChar(gfx::CHAR_CRACKED_WALL, (byte*)gfx::sprites::CRACKED_WALL);
 
             actualPlayerFrame = 255;
             actualFilthFrame = 255;
             actualImpFrame = 255;
+            actualOverlayFrame = 255;
             setCustomChars(lcd_p);
         }
 
@@ -1156,7 +1273,7 @@ namespace game {
 
         const byte TILE_EMPTY = ' ';
         const byte TILE_WALL = gfx::CHAR_WALL;
-        const byte TILE_WALL_CRACKED = gfx::CHAR_WALL_CRACKED;
+        const byte TILE_CRACKED_WALL = gfx::CHAR_CRACKED_WALL;
         const byte TILE_FIRE = gfx::CHAR_FIRE;
 
         Buttons buttonsHeld = {};
@@ -1172,34 +1289,81 @@ namespace game {
         byte actualFilthFrame = 255;
         byte impFrame = 0;
         byte actualImpFrame = 255;
+        byte overlayFrame = 0;
+        byte actualOverlayFrame = 255;
 
+        byte flashDuration = 0;
+        byte flashProgress = 0;
         byte frameNumber = 0; // drawenként nő
 
 
-        const ::game::Layer* layer_p;
+        const game::PatternArray patterns = game::createDefaultPatterns();
+        ::Random levelRandom;
+        const game::Layer* layer_p;
         byte layerNumber = 0;
+        unsigned int layerStepsLeft = 0;
+
+        ::game::Pattern pattern { 0, NULL };
+        byte patternProgress = 0;
+        byte patternPause = 0;
+        const static byte LAYER_INTERMISSION = LCD_WIDTH / 2;
 
         byte stepTimer = 0;
 
         bool playerJumping = false;
 
         BlockmapFlags blockmap[LCD_WIDTH * LCD_HEIGHT];
-        Vec_Shot_32 shots {};
+        Vec_Shot_48 shots {};
         Vec_Obstacle_32 obstacles {};
+        Vec_Filth_32 filths {};
+        Vec_Imp_32 imps {};
+        byte impTimer = 0;
 
 
         void setCustomChars(::LiquidCrystal* lcd_p) {
             if(actualPlayerFrame != playerFrame) {
-                lcd_p->createChar(::gfx::CHAR_PLAYER, (byte*)(playerFrame ? &::gfx::sprites::PLAYER_WALK1 : &::gfx::sprites::PLAYER_WALK2));
+                const byte* sprite;
+                switch(playerFrame) {
+                    default:
+                    case 0: sprite = ::gfx::sprites::PLAYER_WALK1; break;
+                    case 1: sprite = ::gfx::sprites::PLAYER_WALK2; break;
+                    case 2: sprite = ::gfx::sprites::PLAYER_SLIDE; break;
+                }
+                lcd_p->createChar(::gfx::CHAR_PLAYER, (byte*)sprite);
                 actualPlayerFrame = playerFrame;
             }
             if(actualFilthFrame != filthFrame) {
-                lcd_p->createChar(::gfx::CHAR_FILTH, (byte*)(filthFrame ? &::gfx::sprites::FILTH1 : &::gfx::sprites::FILTH2));
+                const byte* sprite;
+                switch(filthFrame) {
+                    default:
+                    case 0: sprite = ::gfx::sprites::FILTH1; break;
+                    case 1: sprite = ::gfx::sprites::FILTH2; break;
+                }
+                lcd_p->createChar(::gfx::CHAR_FILTH, (byte*)sprite);
                 actualFilthFrame = filthFrame;
             }
             if(actualImpFrame != impFrame) {
-                lcd_p->createChar(::gfx::CHAR_IMP, (byte*)(impFrame ? &::gfx::sprites::IMP1 : &::gfx::sprites::IMP2));
+                const byte* sprite;
+                switch(impFrame) {
+                    default:
+                    case 0: sprite = ::gfx::sprites::IMP1; break;
+                    case 1: sprite = ::gfx::sprites::IMP2; break;
+                    case 2: sprite = ::gfx::sprites::IMP_FIRE; break;
+                }
+                lcd_p->createChar(::gfx::CHAR_IMP, (byte*)sprite);
                 actualImpFrame = impFrame;
+            }
+            if(actualOverlayFrame != overlayFrame) {
+                const byte* sprite;
+                switch(overlayFrame) {
+                    default:
+                    case 0: sprite = ::gfx::sprites::FLASH0; break;
+                    case 1: sprite = ::gfx::sprites::FLASH1; break;
+                    case 2: sprite = ::gfx::sprites::FLASH2; break;
+                    case 3: sprite = ::gfx::sprites::FLASH3; break;
+                }
+                lcd_p->createChar(::gfx::CHAR_OVERLAY, (byte*)sprite);
+                actualOverlayFrame = overlayFrame;
             }
 
             byte composedFire[CHAR_HEIGHT];
@@ -1208,26 +1372,154 @@ namespace game {
         }
 
 
-        void updateBlockmap() {
-            memset(blockmap, 0, sizeof(blockmap));
-        }
-
         void switchLayer(byte num) {
             layerNumber = num;
             layer_p = &LAYERS[num];
+            layerStepsLeft = layer_p->length();
 
             String msg("LAYER ");
             msg += num;
             msg += ": ";
             msg += layer_p->name();
             showBanner(msg);
+
+            pattern = Pattern { 0, NULL };
+            patternPause += LAYER_INTERMISSION;
         }
 
-        ::game::BlockmapFlags getBlockmap(byte x, byte y) {
+        game::Pattern getRandomPattern() {
+            unsigned int limit = patterns.getMark(min((unsigned int)layerNumber, patterns.markCount() - 1));
+            unsigned int index = levelRandom.nextUint16(limit);
+            return patterns.get(index);
+        }
+
+        void advancePattern() {
+
+            if(patternPause > 0) patternPause--;
+            while(true) {
+                while(patternProgress >= pattern.tileCount) {
+                    pattern = getRandomPattern();
+                    patternProgress = 0;
+
+                    byte pause = layer_p->minPause() + levelRandom.nextUint8(layer_p->maxPause() - layer_p->minPause());
+                    patternPause += pause;
+                }
+                if(patternPause > 0) break;
+
+                Tile tile = pattern.tiles[patternProgress++];
+                patternPause += tile.getMoves();
+
+                if(tile.isOptional() && levelRandom.nextBit()) continue;
+
+                byte x = LCD_WIDTH - 1;
+                byte y = tile.isTop() ? 0 : 1;
+                TileEntity what = tile.getWhat();
+                sw: switch(what) {
+                    case TILE_ENTITY_FIRE:
+                        obstacles.push(Obstacle(x, y, OBSTACLE_FIRE));
+                        break;
+
+                    case TILE_ENTITY_CRACKED_WALL:
+                        obstacles.push(Obstacle(x, y, OBSTACLE_CRACKED_WALL));
+                        break;
+
+                    case TILE_ENTITY_WALL:
+                        obstacles.push(Obstacle(x, y, OBSTACLE_WALL));
+                        break;
+
+                    case TILE_ENTITY_CRACKED_WALL_OR_WALL:
+                        what = levelRandom.nextBit() ? TILE_ENTITY_CRACKED_WALL : TILE_ENTITY_WALL;
+                        goto sw;
+
+                    case TILE_ENTITY_CRACKED_WALL_OR_FIRE:
+                        what = levelRandom.nextBit() ? TILE_ENTITY_CRACKED_WALL : TILE_ENTITY_FIRE;
+                        goto sw;
+
+                    case TILE_ENTITY_FILTH:
+                        filths.push(Filth(x, y));
+                        break;
+
+                    case TILE_ENTITY_IMP:
+                        imps.push(Imp(x, y));
+                        break;
+
+                    case TILE_ENTITY_IMP_OR_FILTH:
+                        what = levelRandom.nextBit() ? TILE_ENTITY_IMP : TILE_ENTITY_FILTH;
+                        goto sw;
+                }
+            }
+        }
+
+
+        void stepHalfway() {
+            stepShots();
+            dealShotDamages();
+            stepFilths();
+            stepImps();
+
+            updateBlockmap();
+
+            dealShotDamages();
+
+            if(buttonsHeld.down) stepAllway(); // Genuis!
+        }
+
+        void stepAllway() {
+            stepLevel();
+            advancePattern();
+
+            updateBlockmap();
+
+            dealShotDamages();
+
+            if(layerStepsLeft <= 0 && layerNumber < game::LAYER_COUNT - 1) {
+                switchLayer(layerNumber + 1);
+            } else {
+                layerStepsLeft--;
+            }
+        }
+
+
+        void updateBlockmap() {
+            memset(blockmap, 0, sizeof(blockmap));
+
+            for(byte i = 0; i < obstacles.size(); i++) {
+                Obstacle* ent = obstacles[i];
+                if(ent->kind == OBSTACLE_FIRE) {
+                    safeDisjunctBlockmap(ent->posX, ent->posY, BLOCKMAP_FIRE);
+                } else {
+                    safeDisjunctBlockmap(ent->posX, ent->posY, BLOCKMAP_WALL);
+                }
+            }
+
+            for(byte i = 0; i < filths.size(); i++) {
+                Entity* ent = filths[i];
+                safeDisjunctBlockmap(ent->posX, ent->posY, BLOCKMAP_FILTH);
+            }
+
+            for(byte i = 0; i < imps.size(); i++) {
+                Entity* ent = imps[i];
+                safeDisjunctBlockmap(ent->posX, ent->posY, BLOCKMAP_IMP);
+            }
+        }
+
+        ::game::BlockmapFlags* indexBlockmap(byte x, byte y) {
 #if CONF_PANIC_BOUNDS
             if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) panic(PANIC_BLOCKMAP_INDEX_OUT_OF_RANGE);
 #endif
-            return blockmap[(y * LCD_WIDTH) + x];
+            return &blockmap[(y * LCD_WIDTH) + x];
+        }
+
+        ::game::BlockmapFlags getBlockmap(byte x, byte y) { return *indexBlockmap(x, y); }
+
+        void safeDisjunctBlockmap(byte x, byte y, ::game::BlockmapFlags what) {
+            if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) return;
+            blockmap[(y * LCD_WIDTH) + x] = (BlockmapFlags)(blockmap[(y * LCD_WIDTH) + x] | what);
+        }
+
+        void safeConjunctBlockmap(byte x, byte y, ::game::BlockmapFlags what) {
+            if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) return;
+            blockmap[(y * LCD_WIDTH) + x] = (BlockmapFlags)(blockmap[(y * LCD_WIDTH) + x] & ~what);
         }
 
 
@@ -1259,9 +1551,28 @@ namespace game {
         byte playerX() const { return 0; }
         byte playerY() const { return playerJumping ? 0 : 1; }
 
+        // A shot 4-et sebez, a fal 8-at.
         void hitPlayer(byte unscaledDamage) {
             // TODO
             showBanner(String("Ouch!"));
+        }
+
+        void processPlayer() {
+            // TODO ground slam
+            // TODO no sliding in their air!
+            if(playerJumping) {
+                playerJumping = buttonsHeld.up || ((getBlockmap(playerX(), 1) & BLOCKMAP_WALL) > 0);
+            } else {
+                playerJumping = buttonsHeld.up && ((getBlockmap(playerX(), 0) & BLOCKMAP_WALL) == 0);
+            }
+
+            if(buttonsHeld.up && playerJumping) playerFrame = 0;
+            else if(buttonsHeld.down) playerFrame = 2;
+            else playerFrame = (stepTimer >= layer_p->framesPerStep() / 2) ? 1 : 0;
+
+            if(buttonsPressed.right) {
+                shots.push(Shot(playerX() + 1, playerY(), true, false));
+            }
         }
 
         void drawPlayer(::gfx::Frame* frame_p) {
@@ -1269,11 +1580,20 @@ namespace game {
         }
 
 
+        void drawOverlay(::gfx::Frame* frame_p) {
+            frame_p->clear(::gfx::CHAR_OVERLAY);
+        }
+
+
         void drawShots(::gfx::Frame* frame_p) {
             for(byte i = 0; i < shots.size(); i++) {
                 Shot* ent = shots[i];
 
-                *frame_p->index(ent->posX, ent->posY) = '*';
+                char sprite;
+                if(ent->explosive) sprite = '*';
+                else sprite = ent->friendly ? '-' : '+';
+
+                *frame_p->index(ent->posX, ent->posY) = sprite;
             }
         }
 
@@ -1301,6 +1621,14 @@ namespace game {
                         hitPlayer(4);
                     }
                 }
+            }
+        }
+
+        void dealShotDamages() {
+            byte i = shots.size();
+            while(i > 0) {
+                i--;
+                Shot* ent = shots[i];
 
                 if(hitObstacleAt(ent->posX, ent->posY)) {
                     shots.removeAt(i);
@@ -1311,7 +1639,7 @@ namespace game {
 
 
         bool hitObstacleAt(byte x, byte y) {
-            if((getBlockmap(x, y) | BLOCKMAP_WALL) == 0) return false;
+            if((getBlockmap(x, y) & BLOCKMAP_WALL) == 0) return false;
 
             Obstacle* ent = NULL;
             byte i;
@@ -1330,6 +1658,7 @@ namespace game {
                     return true;
                 case OBSTACLE_CRACKED_WALL:
                     obstacles.removeAt(i);
+                    safeConjunctBlockmap(x, y, BLOCKMAP_WALL);
                     return true;
 
                 default: return false;
@@ -1342,7 +1671,7 @@ namespace game {
 
                 char ch;
                 switch(ent->kind) {
-                    case OBSTACLE_CRACKED_WALL: ch = ::gfx::CHAR_WALL_CRACKED; break;
+                    case OBSTACLE_CRACKED_WALL: ch = ::gfx::CHAR_CRACKED_WALL; break;
                     case OBSTACLE_WALL: ch = ::gfx::CHAR_WALL; break;
                     case OBSTACLE_FIRE: ch = ::gfx::CHAR_FIRE; break;
                     default: panic(PANIC_INVALID_ENUM);
@@ -1350,6 +1679,60 @@ namespace game {
 
                 *frame_p->index(ent->posX, ent->posY) = ch;
             }
+        }
+
+        void stepLevel() {
+            byte i = obstacles.size();
+            while(i > 0) {
+                i--;
+                Obstacle* ent = obstacles[i];
+                if(ent->posX == 0) obstacles.removeAt(i);
+                else ent->posX--;
+            }
+
+            i = filths.size();
+            while(i > 0) {
+                i--;
+                Filth* ent = filths[i];
+                if(ent->posX == 0) filths.removeAt(i);
+                else ent->posX--;
+            }
+
+            i = imps.size();
+            while(i > 0) {
+                i--;
+                Imp* ent = imps[i];
+                if(ent->posX == 0) imps.removeAt(i);
+                else ent->posX--;
+            }
+        }
+
+
+        void drawFilths(::gfx::Frame* frame_p) {
+            for(byte i = 0; i < filths.size(); i++) {
+                Filth* ent = filths[i];
+                *frame_p->index(ent->posX, ent->posY) = ::gfx::CHAR_FILTH;
+            }
+        }
+
+        void stepFilths() {
+            filthFrame = (filthFrame + 1) % 2;
+            // TODO
+        }
+
+
+        void drawImps(::gfx::Frame* frame_p) {
+            for(byte i = 0; i < imps.size(); i++) {
+                Imp* ent = imps[i];
+                *frame_p->index(ent->posX, ent->posY) = ::gfx::CHAR_IMP;
+            }
+        }
+
+        void stepImps() {
+            impFrame = (impTimer / 2) % 2;
+            impTimer++;
+            impTimer %= 10;
+            // TODO
         }
     };
 
@@ -1383,7 +1766,8 @@ void setup() {
     DEBUG_LOG_CAPTIONED("Frame length: ", MILLIS_PER_FRAME);
     nextFrameDue = millis() + MILLIS_PER_FRAME;
 
-    scene = new game::Game();
+    scene = new game::Game(149);
+    if(scene == NULL) panic(PANIC_ALLOCATION_FAILED, "Scene");
     //scene = new gfx::CharViewer();
     scene->resume(&lcd);
 }
