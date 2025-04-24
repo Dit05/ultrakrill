@@ -399,6 +399,15 @@ public:
 };
 
 
+namespace text {
+    const char* TITLE = "ULTRAKRILL";
+
+    const char* MOTTO1 = "MANKIND IS DEAD.";
+    const char* MOTTO2 = "BLOOD IS FUEL.";
+    const char* MOTTO3 = "HELL IS FULL.";
+}
+
+
 namespace gfx {
 
     const char* HEX_DIGITS = "0123456789ABCDEF";
@@ -1078,7 +1087,7 @@ namespace game {
         patterns.add(" ",
                      "E");
 
-        patterns.mark();
+        patterns.mark(); // 1.
 
         patterns.add(" x ",
                      "Eee");
@@ -1169,6 +1178,11 @@ namespace game {
         void process() {
             processPlayer();
 
+            if(parryFlash > 0) {
+                parryFlash--;
+                return;
+            }
+
             // Animációk
             animationTimer++;
             fire.advancePhase();
@@ -1201,15 +1215,9 @@ namespace game {
             drawFilths(frame_p);
             drawImps(frame_p);
 
-            if(flashDuration > 0 && frameNumber % 2 != 0) {
-                overlayFrame = (2 * flashProgress * ::gfx::sprites::FLASH_FRAMES) / flashDuration;
-                if(overlayFrame >= ::gfx::sprites::FLASH_FRAMES) overlayFrame = (2 * ::gfx::sprites::FLASH_FRAMES) - overlayFrame - 1;
-
+            if(parryFlash > 0 && frameNumber % 2 != 0) {
+                overlayFrame = ::gfx::sprites::FLASH_FRAMES - (parryFlash * PARRY_FLASH_LENGTH / ::gfx::sprites::FLASH_FRAMES);
                 drawOverlay(frame_p);
-                if(flashProgress++ >= flashDuration) {
-                    flashProgress = 0;
-                    flashDuration = 0;
-                }
             }
 
             drawHud(frame_p);
@@ -1306,11 +1314,26 @@ namespace game {
         ::game::Pattern pattern { 0, NULL };
         byte patternProgress = 0;
         byte patternPause = 0;
-        const static byte LAYER_INTERMISSION = LCD_WIDTH / 2;
+        static const byte LAYER_INTERMISSION = LCD_WIDTH / 2;
 
         byte stepTimer = 0;
 
-        bool playerJumping = false;
+
+        byte parryFlash = 0;
+        byte parryCooldown = 0;
+        static const byte PARRY_FLASH_LENGTH = 10;
+        static const byte PARRY_LENGTH = 10;
+        bool playerUp = false;
+        byte playerIFrames = 0;
+
+        static const byte MAX_HEALTH = CHAR_WIDTH * CHAR_HEIGHT;
+        byte playerHealth = MAX_HEALTH;
+
+        static const byte DAMAGE_MELEE = 10;
+        static const byte DAMAGE_WALL = 4;
+        static const byte DAMAGE_SHOT = 8;
+        static const byte DAMAGE_FIRE = 2;
+
 
         BlockmapFlags blockmap[LCD_WIDTH * LCD_HEIGHT];
         Vec_Shot_48 shots {};
@@ -1366,9 +1389,21 @@ namespace game {
                 actualOverlayFrame = overlayFrame;
             }
 
+            // Tűzkarakter
             byte composedFire[CHAR_HEIGHT];
             fire.compose(composedFire);
             lcd_p->createChar(gfx::CHAR_FIRE, composedFire);
+
+            // Életkarakter
+            byte juice[CHAR_HEIGHT];
+            byte bitsLeft = playerHealth;
+            for(byte y = 0; y < CHAR_HEIGHT && bitsLeft > 0; y++) {
+                for(byte x = 0; x < CHAR_WIDTH && bitsLeft > 0; x++) {
+                    juice[y] |= 1 << (CHAR_WIDTH - x - 1);
+                    bitsLeft--;
+                }
+            }
+            lcd_p->createChar(gfx::CHAR_HEALTH, juice);
         }
 
 
@@ -1461,7 +1496,7 @@ namespace game {
 
             dealShotDamages();
 
-            if(buttonsHeld.down) stepAllway(); // Genuis!
+            if(buttonsHeld.down && !buttonsHeld.up) stepAllway(); // Genuis! (enemies aren't updated)
         }
 
         void stepAllway() {
@@ -1470,6 +1505,9 @@ namespace game {
 
             updateBlockmap();
 
+            dealShotDamages();
+
+            stepShots();
             dealShotDamages();
 
             if(layerStepsLeft <= 0 && layerNumber < game::LAYER_COUNT - 1) {
@@ -1524,10 +1562,6 @@ namespace game {
 
 
         void drawHud(::gfx::Frame* frame_p) {
-            // Élet
-            *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
-            // Réteg
-            *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = "0123456789"[layerNumber];
 
             // Banner
             if((frameNumber % 3 == 0) && banner.length() > 0) {
@@ -1545,38 +1579,92 @@ namespace game {
                     banner = String {};
                 }
             }
+
+            // Élet
+            *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
+            // Réteg
+            *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = "0123456789"[layerNumber];
         }
 
 
         byte playerX() const { return 0; }
-        byte playerY() const { return playerJumping ? 0 : 1; }
+        byte playerY() const { return playerUp ? 0 : 1; }
 
-        // A shot 4-et sebez, a fal 8-at.
-        void hitPlayer(byte unscaledDamage) {
-            // TODO
-            showBanner(String("Ouch!"));
+        void hitPlayer(byte unscaledDamage, bool grantIFrames) {
+            if(playerIFrames > 0) return;
+            if(grantIFrames) playerIFrames = 16;
+
+            if(playerHealth >= unscaledDamage) playerHealth -= unscaledDamage;
+            else playerHealth = 0;
+            // TODO skálázás nehézséggel
+            //showBanner(String("Ouch!"));
         }
 
+        void hitPlayer(byte unscaledDamage) { hitPlayer(unscaledDamage, true); }
+
+        void healPlayer(byte amount) {
+            if(playerHealth + amount > MAX_HEALTH) playerHealth = MAX_HEALTH;
+            else playerHealth += amount;
+        }
+
+
         void processPlayer() {
+            if(playerIFrames > 0) playerIFrames--;
+            if(parryCooldown > 0) parryCooldown--;
+
             // TODO ground slam
-            // TODO no sliding in their air!
-            if(playerJumping) {
-                playerJumping = buttonsHeld.up || ((getBlockmap(playerX(), 1) & BLOCKMAP_WALL) > 0);
+            if(playerUp) {
+                playerUp = buttonsHeld.up || ((getBlockmap(playerX(), 1) & BLOCKMAP_WALL) > 0);
             } else {
-                playerJumping = buttonsHeld.up && ((getBlockmap(playerX(), 0) & BLOCKMAP_WALL) == 0);
+                playerUp = buttonsHeld.up && ((getBlockmap(playerX(), 0) & BLOCKMAP_WALL) == 0);
             }
 
-            if(buttonsHeld.up && playerJumping) playerFrame = 0;
+            if(buttonsHeld.up) playerFrame = 0;
             else if(buttonsHeld.down) playerFrame = 2;
             else playerFrame = (stepTimer >= layer_p->framesPerStep() / 2) ? 1 : 0;
 
             if(buttonsPressed.right) {
-                shots.push(Shot(playerX() + 1, playerY(), true, false));
+                bool parried = false;
+                if(parryCooldown == 0) {
+                    for(byte i = 0; i < shots.size(); i++) {
+                        Shot* ent = shots[i];
+                        if(!ent->friendly && ent->posY == playerY() && ent->posX <= 1) {
+                            parryFlash = PARRY_FLASH_LENGTH;
+                            ent->friendly = true;
+                            ent->posX = 1;
+                            ent->explosive = true;
+
+                            if(!parried) {
+                                playerIFrames = max(playerIFrames, (byte)5);
+                                healPlayer(MAX_HEALTH / 2);
+                            }
+                            parried = true;
+                        }
+                    }
+                }
+                parryCooldown = PARRY_LENGTH;
+
+                if(!parried) {
+                    // TODO chargeable explosive shot
+                    // TODO cooldown on this maybe?
+                    shots.push(Shot(playerX(), playerY(), true, false));
+                }
+            }
+
+            BlockmapFlags bm = getBlockmap(playerX(), playerY());
+            if((bm & BLOCKMAP_ENEMY) > 0) {
+                hitPlayer(DAMAGE_MELEE);
+            } else if((bm & BLOCKMAP_WALL) > 0) {
+                hitPlayer(DAMAGE_WALL, false);
+            } else if((bm & BLOCKMAP_FIRE) > 0) {
+                hitPlayer(DAMAGE_FIRE, false);
             }
         }
 
         void drawPlayer(::gfx::Frame* frame_p) {
-            *frame_p->index(playerX(), playerY()) = ::gfx::CHAR_PLAYER;
+            if(playerIFrames == 0 || (frameNumber % 8 < 4)) {
+                *frame_p->index(playerX(), playerY()) = ::gfx::CHAR_PLAYER;
+            }
         }
 
 
@@ -1611,15 +1699,15 @@ namespace game {
 
                     ent->posX++;
                 } else {
+                    if(ent->posX == playerX() && ent->posY == playerY()) {
+                        hitPlayer(DAMAGE_SHOT);
+                    }
+
                     if(ent->posX <= 0) {
                         shots.removeAt(i);
                         continue;
                     }
-
                     ent->posX--;
-                    if(ent->posX == playerX() && ent->posY == playerY()) {
-                        hitPlayer(4);
-                    }
                 }
             }
         }
@@ -1631,6 +1719,10 @@ namespace game {
                 Shot* ent = shots[i];
 
                 if(hitObstacleAt(ent->posX, ent->posY)) {
+                    shots.removeAt(i);
+                    continue;
+                }
+                if(ent->friendly && hitEnemyAt(ent->posX, ent->posY, 1)) {
                     shots.removeAt(i);
                     continue;
                 }
@@ -1664,6 +1756,28 @@ namespace game {
                 default: return false;
             }
         }
+
+        bool hitEnemyAt(byte x, byte y, byte violence) {
+            if((getBlockmap(x, y) & BLOCKMAP_ENEMY) == 0) return false;
+            // TODO blood
+
+            for(byte i = 0; i < filths.size(); i++) {
+                Filth* here = filths[i];
+                if(here->posX != x || here->posY != y) continue;
+                filths.removeAt(i);
+                return true;
+            }
+
+            for(byte i = 0; i < imps.size(); i++) {
+                Imp* here = imps[i];
+                if(here->posX != x || here->posY != y) continue;
+                imps.removeAt(i);
+                return true;
+            }
+
+            return false;
+        }
+
 
         void drawObstacles(::gfx::Frame* frame_p) {
             for(byte i = 0; i < obstacles.size(); i++) {
@@ -1717,7 +1831,6 @@ namespace game {
 
         void stepFilths() {
             filthFrame = (filthFrame + 1) % 2;
-            // TODO
         }
 
 
@@ -1729,9 +1842,21 @@ namespace game {
         }
 
         void stepImps() {
-            impFrame = (impTimer / 2) % 2;
             impTimer++;
             impTimer %= 10;
+
+            if(impTimer > 7) {
+                impFrame = 2;
+            } else {
+                impFrame = (impTimer / 2) % 2;
+            }
+
+            if(impTimer == 0) {
+                for(byte i = 0; i < imps.size(); i++) {
+                    Imp* ent = imps[i];
+                    if(ent->posX > 0) shots.push(Shot(ent->posX - 1, ent->posY, false, false));
+                }
+            }
             // TODO
         }
     };

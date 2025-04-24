@@ -18,6 +18,9 @@ public:
         if(!SDL_CreateWindowAndRenderer("lcd emulator", SCALE * (CHAR_WIDTH * WIDTH + 2 * MARGIN + (WIDTH - 1) * (GAP_HORIZONTAL)), SCALE * (CHAR_HEIGHT * HEIGHT + 2 * MARGIN + (HEIGHT - 1) * GAP_VERTICAL), 0, &window, &renderer)) {
             SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
         }
+        if(!SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED)) {
+            SDL_Log("Couldn't center window: %s", SDL_GetError());
+        }
 
         SDL_Surface *fontSurface = IMG_Load("font.png");
         if(fontSurface == NULL) {
