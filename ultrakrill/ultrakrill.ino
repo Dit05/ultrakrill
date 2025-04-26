@@ -85,6 +85,7 @@ const byte PANIC_LAG = 5;
 const byte PANIC_INVALID_ENUM = 6;
 const byte PANIC_BLOCKMAP_INDEX_OUT_OF_RANGE = 7;
 const byte PANIC_ALLOCATION_FAILED = 8;
+const byte PANIC_SCROLLER_INDEX_OUT_OF_RANGE = 9;
 
 
 // Végtelen ciklusban villogja le a megadott `code`-ot.
@@ -264,6 +265,7 @@ public:
     Random(uint16_t startState) {
         if(startState == 0) startState++;
         lfsr = startState;
+        warmup(20); // "Bemelegítés: 20 fekvőtámasz"
     }
 
     void warmup(unsigned int steps) {
@@ -412,17 +414,19 @@ namespace gfx {
 
     const char* HEX_DIGITS = "0123456789ABCDEF";
 
-    const byte CHAR_FIRE = 0; // Procedural fire.
-    const byte CHAR_PLAYER = 1; // Animated player character.
-    const byte CHAR_WALL = 2; // Pristine wall.
-    const byte CHAR_CRACKED_WALL = 3; // Damaged wall.
-    const byte CHAR_HEALTH = 4; // Procedural health bar.
-    const byte CHAR_FILTH = 5; // Animated character for the ground enemy.
-    const byte CHAR_IMP = 6; // Animated character for the flying-shooting enemy.
-    const byte CHAR_OVERLAY = 7; // Character for full-screen overlay.
+    constexpr const byte CHAR_FIRE = 0; // Procedural fire.
+    constexpr const byte CHAR_PLAYER = 1; // Animated player character.
+    constexpr const byte CHAR_WALL = 2; // Pristine wall.
+    constexpr const byte CHAR_CRACKED_WALL = 3; // Damaged wall.
+    constexpr const byte CHAR_HEALTH = 4; // Procedural health bar.
+    constexpr const byte CHAR_FILTH = 5; // Animated character for the ground enemy.
+    constexpr const byte CHAR_IMP = 6; // Animated character for the flying-shooting enemy.
+    constexpr const byte CHAR_OVERLAY = 7; // Character for full-screen overlay.
 
     const char* SHOOT_CHARGE_CHARS = " .,;|+*";
+
     const char* SMOKE = ",;x&@";
+    const byte SMOKE_MAX = strlen(SMOKE) - 1;
 
     const char BLOOD = '#';
 
@@ -432,7 +436,7 @@ namespace gfx {
     public:
 
         Fire() {
-            ::Random rand(149);
+            ::Random rand(millis() + 149);
             fillMask(&rand, mask1);
             fillMask(&rand, mask2);
         }
@@ -829,22 +833,11 @@ namespace game {
 
 
     enum ObstacleKind : byte {
-        OBSTACLE_CRACKED_WALL = 0,
-        OBSTACLE_WALL = 1,
-        OBSTACLE_FIRE = 2
+        OBSTACLE_EMPTY = 0,
+        OBSTACLE_CRACKED_WALL = 1,
+        OBSTACLE_WALL = 2,
+        OBSTACLE_FIRE = 3
     };
-
-    struct Obstacle : public Entity {
-        ObstacleKind kind;
-
-        Obstacle() {}
-        Obstacle(byte posX, byte posY, ObstacleKind kind) {
-            this->posX = posX;
-            this->posY = posY;
-            this->kind = kind;
-        }
-    };
-    GENERIC_VECTOR_DECL(Vec_Obstacle_32, game::Obstacle, 32);
 
 
     enum TileEntity : byte {
@@ -1147,14 +1140,44 @@ namespace game {
 
 
     enum BlockmapFlags : byte {
-        BLOCKMAP_WALL = 1,
-        BLOCKMAP_FIRE = 2,
-        BLOCKMAP_FILTH = 4,
-        BLOCKMAP_IMP = 8,
+        BLOCKMAP_FILTH = 1,
+        BLOCKMAP_IMP = 2,
 
         BLOCKMAP_NOTHING = 0,
         BLOCKMAP_ENEMY = BLOCKMAP_FILTH | BLOCKMAP_IMP,
-        BLOCKMAP_ALL = 16 - 1
+        BLOCKMAP_ALL = 4 - 1
+    };
+
+
+    class Scroller {
+    public:
+        const static byte WIDTH = LCD_WIDTH;
+        const static byte HEIGHT = LCD_HEIGHT;
+
+        bool indexValid(byte x, byte y) const {
+            return x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT;
+        }
+
+        byte* index(byte x, byte y) {
+#if CONF_PANIC_BOUNDS
+            if(!indexValid(x, y)) panic(PANIC_SCROLLER_INDEX_OUT_OF_RANGE);
+#endif
+            return &buffer[(y * WIDTH) + ((x + scroll) % WIDTH)];
+        }
+
+        void shiftLeft() {
+            scroll++;
+            if(scroll >= WIDTH) scroll -= WIDTH;
+        }
+
+        void shiftLeft(byte fillWith) {
+            for(byte y = 0; y < HEIGHT; y++) *index(0, y) = fillWith;
+            shiftLeft();
+        }
+
+    private:
+        byte buffer[WIDTH * HEIGHT] {};
+        byte scroll = 0;
     };
 
 
@@ -1164,7 +1187,6 @@ namespace game {
 
         Game(uint16_t seed) : levelRandom(seed) {
             bufferB.clear();
-            levelRandom.warmup(20); // "Bemelegítés: 20 fekvőtámasz"
 
             switchLayer(0);
             patternPause = 0;
@@ -1192,11 +1214,31 @@ namespace game {
             }
 
             // Animációk
-            animationTimer++;
+            processTimer++;
             fire.advancePhase();
 
             // Blockmap (OPTIMIZE: nem minden processkor updatel, csak ha kell)
             updateBlockmap();
+
+            // Különböző mapek fogyása
+            if(processTimer % 2 == 0) {
+                for(byte y = 0; y < bloodMap.HEIGHT; y++) {
+                    for(byte x = 0; x < bloodMap.WIDTH; x++) {
+                        byte* blood = bloodMap.index(x, y);
+                        if(*blood > 0) {
+                            byte loss = max(1, *blood / 8);
+                            *blood -= loss;
+                        }
+                    }
+                }
+            } else {
+                for(byte y = 0; y < smokeMap.HEIGHT; y++) {
+                    for(byte x = 0; x < smokeMap.WIDTH; x++) {
+                        byte* smoke = smokeMap.index(x, y);
+                        if(*smoke > 0) (*smoke)--;
+                    }
+                }
+            }
 
             stepTimer++;
             if(stepTimer >= layer_p->framesPerStep()) {
@@ -1213,10 +1255,14 @@ namespace game {
             // Entitások
             if(frameNumber % 2 == 0) { // Genuis!
                 drawObstacles(frame_p);
+                drawSmoke(frame_p);
+                drawBlood(frame_p);
                 drawShots(frame_p);
             } else {
                 drawShots(frame_p);
                 drawObstacles(frame_p);
+                drawSmoke(frame_p);
+                drawBlood(frame_p);
             }
 
             drawPlayer(frame_p);
@@ -1229,12 +1275,6 @@ namespace game {
             }
 
             drawHud(frame_p);
-
-            /*for(byte y = 0; y < LCD_HEIGHT; y++) {
-                for(byte x = 0; x < LCD_WIDTH; x++) {
-                    *frame_p->index(x, y) = ((getBlockmap(x, y) & BLOCKMAP_WALL) > 0) ? 'w' : ' ';
-                }
-            }*/
 
             // Prezentálás
             setCustomChars(lcd_p);
@@ -1287,10 +1327,10 @@ namespace game {
             0b00000
         };
 
-        const byte TILE_EMPTY = ' ';
+        /*const byte TILE_EMPTY = ' ';
         const byte TILE_WALL = gfx::CHAR_WALL;
         const byte TILE_CRACKED_WALL = gfx::CHAR_CRACKED_WALL;
-        const byte TILE_FIRE = gfx::CHAR_FIRE;
+        const byte TILE_FIRE = gfx::CHAR_FIRE; TODO ezek miért léteztek? */
 
         Buttons buttonsHeld = {};
         Buttons buttonsPressed = {};
@@ -1298,7 +1338,9 @@ namespace game {
 
         gfx::Fire fire {};
 
-        byte animationTimer = 0; // processenként nő
+        byte processTimer = 0; // processenként nő
+        byte bloodDrainTimer = 0; // stepHalfwayenként nő
+
         byte playerFrame = 0;
         byte actualPlayerFrame = 255;
         byte filthFrame = 0;
@@ -1349,7 +1391,9 @@ namespace game {
 
         BlockmapFlags blockmap[LCD_WIDTH * LCD_HEIGHT];
         Vec_Shot_48 shots {};
-        Vec_Obstacle_32 obstacles {};
+        Scroller obstacleMap {};
+        Scroller smokeMap {};
+        Scroller bloodMap {};
         Vec_Filth_32 filths {};
         Vec_Imp_32 imps {};
         byte impTimer = 0;
@@ -1463,15 +1507,15 @@ namespace game {
                 TileEntity what = tile.getWhat();
                 sw: switch(what) {
                     case TILE_ENTITY_FIRE:
-                        obstacles.push(Obstacle(x, y, OBSTACLE_FIRE));
+                        *obstacleMap.index(x, y) = OBSTACLE_FIRE;
                         break;
 
                     case TILE_ENTITY_CRACKED_WALL:
-                        obstacles.push(Obstacle(x, y, OBSTACLE_CRACKED_WALL));
+                        *obstacleMap.index(x, y) = OBSTACLE_CRACKED_WALL;
                         break;
 
                     case TILE_ENTITY_WALL:
-                        obstacles.push(Obstacle(x, y, OBSTACLE_WALL));
+                        *obstacleMap.index(x, y) = OBSTACLE_WALL;
                         break;
 
                     case TILE_ENTITY_CRACKED_WALL_OR_WALL:
@@ -1509,6 +1553,21 @@ namespace game {
             dealShotDamages();
 
             if(buttonsHeld.down && !buttonsHeld.up) stepAllway(); // Genuis! (enemies aren't updated)
+
+            // Vércsökkentés
+            bloodDrainTimer++;
+            if(playerHealth > 1) {
+                if(playerHealth > MAX_HEALTH) playerHealth = MAX_HEALTH;
+
+                byte drainOnceEvery;
+                if(playerHealth > 20) drainOnceEvery = 1;
+                else if(playerHealth > 15) drainOnceEvery = 2;
+                else if(playerHealth > 10) drainOnceEvery = 4;
+                else if(playerHealth > 5) drainOnceEvery = 8;
+                else drainOnceEvery = 16;
+
+                if((bloodDrainTimer % drainOnceEvery) == 0) playerHealth--;
+            }
         }
 
         void stepAllway() {
@@ -1517,11 +1576,12 @@ namespace game {
 
             updateBlockmap();
             BlockmapFlags bm = getBlockmap(playerX(), playerY());
+            ObstacleKind obst = (ObstacleKind)*obstacleMap.index(playerX(), playerY());
             if((bm & BLOCKMAP_ENEMY) > 0) {
                 hitPlayer(DAMAGE_MELEE);
-            } else if((bm & BLOCKMAP_WALL) > 0) {
+            } else if(obst == OBSTACLE_WALL || obst == OBSTACLE_CRACKED_WALL) {
                 hitPlayer(DAMAGE_WALL, false);
-            } else if((bm & BLOCKMAP_FIRE) > 0) {
+            } else if(obst == OBSTACLE_FIRE) {
                 hitPlayer(DAMAGE_FIRE, false);
             }
 
@@ -1540,15 +1600,6 @@ namespace game {
 
         void updateBlockmap() {
             memset(blockmap, 0, sizeof(blockmap));
-
-            for(byte i = 0; i < obstacles.size(); i++) {
-                Obstacle* ent = obstacles[i];
-                if(ent->kind == OBSTACLE_FIRE) {
-                    safeDisjunctBlockmap(ent->posX, ent->posY, BLOCKMAP_FIRE);
-                } else {
-                    safeDisjunctBlockmap(ent->posX, ent->posY, BLOCKMAP_WALL);
-                }
-            }
 
             for(byte i = 0; i < filths.size(); i++) {
                 Entity* ent = filths[i];
@@ -1577,6 +1628,7 @@ namespace game {
 
         ::game::BlockmapFlags safeGetBlockmap(byte x, byte y) {
             if(blockmapIndexValid(x, y)) return blockmap[(y * LCD_WIDTH) + x];
+            else return BLOCKMAP_NOTHING;
         }
 
         void safeDisjunctBlockmap(byte x, byte y, ::game::BlockmapFlags what) {
@@ -1641,7 +1693,7 @@ namespace game {
         void hitPlayer(byte unscaledDamage) { hitPlayer(unscaledDamage, true); }
 
         void healPlayer(byte amount) {
-            if(playerHealth + amount > MAX_HEALTH) playerHealth = MAX_HEALTH;
+            if(playerHealth + amount >= MAX_HEALTH) playerHealth = MAX_HEALTH;
             else playerHealth += amount;
         }
 
@@ -1653,9 +1705,9 @@ namespace game {
 
             // TODO ground slam
             if(playerUp) {
-                playerUp = buttonsHeld.up || ((getBlockmap(playerX(), 1) & BLOCKMAP_WALL) > 0);
+                playerUp = buttonsHeld.up || (*obstacleMap.index(playerX(), 1) != OBSTACLE_EMPTY);
             } else {
-                playerUp = buttonsHeld.up && ((getBlockmap(playerX(), 0) & BLOCKMAP_WALL) == 0);
+                playerUp = buttonsHeld.up && (*obstacleMap.index(playerX(), 0) == OBSTACLE_EMPTY);
             }
 
             if(buttonsHeld.up) playerFrame = 0;
@@ -1698,6 +1750,12 @@ namespace game {
                 if(!shootFullyCharged()) shootCharge++;
             } else {
                 shootCharge = 0;
+            }
+
+            byte* blood_p = bloodMap.index(playerX(), playerY());
+            if(*blood_p > 0) {
+                healPlayer(*blood_p / 8);
+                *blood_p = 0;
             }
         }
 
@@ -1758,96 +1816,196 @@ namespace game {
                 i--;
                 Shot* ent = shots[i];
 
-                if(hitObstacleAt(ent->posX, ent->posY)) {
-                    shots.removeAt(i);
-                    continue;
+                bool impacted = false;
+                if(ent->explosive) {
+                    // Direkt nem sebzünk, mert a robbanás violentebb és több vért csinál.
+                    if(
+                        (obstacleMap.indexValid(ent->posX, ent->posY) && *obstacleMap.index(ent->posX, ent->posY) != OBSTACLE_EMPTY)
+                        || ((safeGetBlockmap(ent->posX, ent->posY) & BLOCKMAP_ENEMY) != 0)
+                    ) {
+                        explodeAt(ent->posX, ent->posY);
+                        impacted = true;
+                    }
+                } else {
+                    impacted = hitObstacleAt(ent->posX, ent->posY)
+                        || (ent->friendly && hitEnemyAt(ent->posX, ent->posY, 1));
                 }
-                if(ent->friendly && hitEnemyAt(ent->posX, ent->posY, 1)) {
+
+                if(impacted) {
                     shots.removeAt(i);
                     continue;
                 }
             }
         }
 
+
+        // Visszaadja a sebzések számát.
+        byte hitObstacleAt(byte x, byte y, byte maxHits) {
+            if(maxHits == 0 || !obstacleMap.indexValid(x, y)) return false;
+
+            ObstacleKind* obst_p = (ObstacleKind*)obstacleMap.index(x, y);
+            switch(*obst_p) {
+                case OBSTACLE_WALL:
+                    if(maxHits >= 2) {
+                        *obst_p = OBSTACLE_EMPTY;
+                        return 2;
+                    } else {
+                        *obst_p = OBSTACLE_CRACKED_WALL;
+                        return 1;
+                    }
+                case OBSTACLE_CRACKED_WALL:
+                    *obst_p = OBSTACLE_EMPTY;
+                    return 1;
+
+                default: return 0;
+            }
+        }
 
         bool hitObstacleAt(byte x, byte y) {
-            if((safeGetBlockmap(x, y) & BLOCKMAP_WALL) == 0) return false;
+            return hitObstacleAt(x, y, 1) == 1;
+        }
 
-            Obstacle* ent = NULL;
-            byte i;
-            for(i = 0; i < obstacles.size(); i++) {
-                Obstacle* here = obstacles[i];
-                if(here->posX != x || here->posY != y) continue;
-                ent = here;
-                break;
-            }
 
-            if(ent == NULL) return false;
+        byte addBloodAt(byte x, byte y, unsigned int amount) {
+            byte* ptr = bloodMap.index(x, y);
+            byte lack = 255 - *ptr;
 
-            switch(ent->kind) {
-                case OBSTACLE_WALL:
-                    ent->kind = OBSTACLE_CRACKED_WALL;
-                    return true;
-                case OBSTACLE_CRACKED_WALL:
-                    obstacles.removeAt(i);
-                    safeConjunctBlockmap(x, y, BLOCKMAP_WALL);
-                    return true;
-
-                default: return false;
+            if(lack >= amount) {
+                *ptr += amount;
+                return amount;
+            } else {
+                *ptr = 255;
+                return lack;
             }
         }
 
-        bool hitEnemyAt(byte x, byte y, byte violence) {
+        void createBloodAt(byte x, byte y, unsigned int amount) {
+            byte limit = max(x, byte((bloodMap.WIDTH - 1) - x));
+
+            for(byte i = 0; i <= limit && amount > 0; i++) {
+                amount -= addBloodAt(x - i, y, amount);
+                amount -= addBloodAt(x + i, y, amount);
+            }
+        }
+
+
+        // Visszaadja a sebzések számát.
+        bool hitEnemyAt(byte x, byte y, byte violence, byte maxHits) {
             if((safeGetBlockmap(x, y) & BLOCKMAP_ENEMY) == 0) return false;
-            // TODO blood
 
             for(byte i = 0; i < filths.size(); i++) {
                 Filth* ent = filths[i];
                 if(ent->posX != x || ent->posY != y) continue;
+
+                createBloodAt(ent->posX, ent->posY, 64 * violence);
                 filths.removeAt(i);
-                return true;
+
+                return 1;
             }
 
             for(byte i = 0; i < imps.size(); i++) {
                 Imp* ent = imps[i];
                 if(ent->posX != x || ent->posY != y) continue;
 
-                if(ent->health <= 1) imps.removeAt(i);
-                else ent->health--;
-                return true;
+                if(ent->health <= maxHits) {
+                    createBloodAt(ent->posX, ent->posY, 96 * violence);
+                    imps.removeAt(i);
+                    return ent->health;
+                } else {
+                    ent->health -= maxHits;
+                    return maxHits;
+                }
             }
 
-            return false;
+            return 0;
+        }
+
+        bool hitEnemyAt(byte x, byte y, byte violence) {
+            return hitEnemyAt(x, y, violence, 1) == 1;
+        }
+
+
+        // Visszaadja a sebzések számát.
+        byte explodeAt(byte x, byte y) {
+            byte total = 0;
+
+            byte xMin = (x > 0) ? x - 1 : x;
+            byte xMax = (x < LCD_WIDTH - 1) ? x + 1 : x;
+            byte yMin = (y > 0) ? y - 1 : y;
+            byte yMax = (y < LCD_HEIGHT - 1) ? y + 1 : y;
+
+            for(byte j = yMin; j <= yMax; j++) {
+                for(byte i = xMin; i <= xMax; i++) {
+                    byte dist = (i < x ? x - i : i - x) + (j < y ? y - j : j - y); // Unsignedítisz
+                    byte damage = 3 - dist;
+
+                    total += hitObstacleAt(i, j, damage);
+                    total += hitEnemyAt(i, j, damage, damage);
+
+                    byte* smoke_p = smokeMap.index(i, j);
+                    *smoke_p = min(byte(*smoke_p + (::gfx::SMOKE_MAX - dist)), ::gfx::SMOKE_MAX);
+                }
+            }
+
+            return total;
         }
 
 
         void drawObstacles(::gfx::Frame* frame_p) {
-            for(byte i = 0; i < obstacles.size(); i++) {
-                Obstacle* ent = obstacles[i];
-
-                char ch;
-                switch(ent->kind) {
-                    case OBSTACLE_CRACKED_WALL: ch = ::gfx::CHAR_CRACKED_WALL; break;
-                    case OBSTACLE_WALL: ch = ::gfx::CHAR_WALL; break;
-                    case OBSTACLE_FIRE: ch = ::gfx::CHAR_FIRE; break;
-                    default: panic(PANIC_INVALID_ENUM);
+            for(byte y = 0; y < LCD_HEIGHT; y++) {
+                for(byte x = 0; x < LCD_WIDTH; x++) {
+                    char ch;
+                    switch(*obstacleMap.index(x, y)) {
+                        case OBSTACLE_EMPTY: ch = ' '; break;
+                        case OBSTACLE_CRACKED_WALL: ch = ::gfx::CHAR_CRACKED_WALL; break;
+                        case OBSTACLE_WALL: ch = ::gfx::CHAR_WALL; break;
+                        case OBSTACLE_FIRE: ch = ::gfx::CHAR_FIRE; break;
+                        default: panic(PANIC_INVALID_ENUM);
+                    }
+                    if(ch != ' ') *frame_p->index(x, y) = ch;
                 }
+            }
+        }
 
-                *frame_p->index(ent->posX, ent->posY) = ch;
+        void drawBlood(::gfx::Frame* frame_p) {
+            for(byte y = 0; y < LCD_HEIGHT; y++) {
+                for(byte x = 0; x < LCD_WIDTH; x++) {
+                    byte blood = *bloodMap.index(x, y);
+
+                    // TODO flicker based on amount
+                    char ch;
+                    byte flickerPhase = frameNumber / 2;
+
+                    if(blood >= 128) ch = ::gfx::BLOOD;
+                    else if(blood >= 64 && (flickerPhase % 2 == 0)) ch = ::gfx::BLOOD;
+                    else if(blood >= 32 && (flickerPhase % 3 == 0)) ch = ::gfx::BLOOD;
+                    else if(blood > 0 && (flickerPhase % 4 == 0)) ch = ::gfx::BLOOD;
+                    else ch = '\0';
+
+                    if(ch != '\0') *frame_p->index(x, y) = ch;
+                }
+            }
+        }
+
+        void drawSmoke(::gfx::Frame* frame_p) {
+            for(byte y = 0; y < LCD_HEIGHT; y++) {
+                for(byte x = 0; x < LCD_WIDTH; x++) {
+                    char ch;
+
+                    byte smoke = *smokeMap.index(x, y);
+                    if(smoke > 0) {
+                        *frame_p->index(x, y) = ::gfx::SMOKE[min(smoke, ::gfx::SMOKE_MAX)];;
+                    }
+                }
             }
         }
 
         void stepLevel() {
-            byte i = obstacles.size();
-            while(i > 0) {
-                i--;
-                Obstacle* ent = obstacles[i];
+            obstacleMap.shiftLeft(OBSTACLE_EMPTY);
+            bloodMap.shiftLeft(0);
+            smokeMap.shiftLeft(0);
 
-                if(ent->posX == 0) obstacles.removeAt(i);
-                else ent->posX--;
-            }
-
-            i = filths.size();
+            byte i = filths.size();
             while(i > 0) {
                 i--;
                 Filth* ent = filths[i];
