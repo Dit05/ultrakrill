@@ -204,6 +204,13 @@ struct HardwareSerial {
         std::cout << (int)b;
         std::cout << '\n';
     }
+    static void print(const bool b) {
+        std::cout << b;
+    }
+    static void println(const bool b) {
+        std::cout << b;
+        std::cout << '\n';
+    }
     static void print(const unsigned int b) {
         std::cout << b;
     }

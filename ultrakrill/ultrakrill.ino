@@ -235,7 +235,7 @@ public:\
         checkBounds(index);\
 \
         size_m--;\
-        for(int i = index; i < size_m; i++) {\
+        for(unsigned int i = index; i < size_m; i++) {\
             ptr_m[i] = ptr_m[i + 1];\
         }\
     }\
@@ -421,6 +421,11 @@ namespace gfx {
     const byte CHAR_IMP = 6; // Animated character for the flying-shooting enemy.
     const byte CHAR_OVERLAY = 7; // Character for full-screen overlay.
 
+    const char* SHOOT_CHARGE_CHARS = " .,;|+*";
+    const char* SMOKE = ",;x&@";
+
+    const char BLOOD = '#';
+
 
     class Fire {
 
@@ -488,9 +493,9 @@ namespace gfx {
         }
 
         void fillMask(::Random* rand_p, byte mask[8]) {
-            for(size_t i = 0; i < CHAR_HEIGHT; i++) {
+            for(byte i = 0; i < CHAR_HEIGHT; i++) {
                 byte row = 0;
-                for(int j = 0; j < i + 1; j++) {
+                for(byte j = 0; j < i + 1; j++) {
                     row |= (0b1 << rand_p->nextUint8(CHAR_WIDTH));
                 }
                 mask[i] = row;
@@ -813,6 +818,8 @@ namespace game {
     GENERIC_VECTOR_DECL(Vec_Filth_32, game::Filth, 32);
 
     struct Imp : public Entity {
+        byte health = 3;
+
         Imp(byte posX, byte posY) {
             this->posX = posX;
             this->posY = posY;
@@ -997,6 +1004,7 @@ namespace game {
                     str += "Invalid TileEntity: ";
                     str += ch;
                     panic(PANIC_INVALID_ENUM, str.c_str());
+                    return TILE_ENTITY_FIRE;
             }
         }
 
@@ -1126,14 +1134,14 @@ namespace game {
 
     const int LAYER_COUNT = 9;
     const Layer LAYERS[LAYER_COUNT] {
-        Layer(90, 18, "LIMBO", 6, 10),
-        Layer(100, 16, "LUST", 3, 8),
-        Layer(200, 14, "GLUTTONY", 2, 7),
-        Layer(400, 12, "GREED", 2, 6),
-        Layer(800, 10, "WRATH", 1, 6),
-        Layer(1600, 8, "HERESY", 1, 5),
-        Layer(3200, 6, "VIOLENCE", 1, 4),
-        Layer(4800, 4, "FRAUD", 0, 4),
+        Layer(90, 12, "LIMBO", 6, 10),
+        Layer(100, 10, "LUST", 3, 8),
+        Layer(200, 8, "GLUTTONY", 2, 7),
+        Layer(400, 7, "GREED", 2, 6),
+        Layer(800, 6, "WRATH", 1, 6),
+        Layer(1600, 5, "HERESY", 1, 5),
+        Layer(3200, 4, "VIOLENCE", 1, 4),
+        Layer(4800, 3, "FRAUD", 0, 4),
         Layer(0xffff, 2, "TREACHERY", 0, 3)
     }; // A leghosszabb név 9 betű. A frames per step legyen páros, hogy a shotok tudjanak a felénél lépni.
 
@@ -1314,7 +1322,7 @@ namespace game {
         ::game::Pattern pattern { 0, NULL };
         byte patternProgress = 0;
         byte patternPause = 0;
-        static const byte LAYER_INTERMISSION = LCD_WIDTH / 2;
+        static const byte LAYER_INTERMISSION = LCD_WIDTH / 4;
 
         byte stepTimer = 0;
 
@@ -1322,7 +1330,11 @@ namespace game {
         byte parryFlash = 0;
         byte parryCooldown = 0;
         static const byte PARRY_FLASH_LENGTH = 10;
-        static const byte PARRY_LENGTH = 10;
+        static const byte PARRY_COOLDOWN = 10;
+        byte shootCooldown = 0;
+        static const byte SHOOT_COOLDOWN = 10;
+        byte shootCharge = 0;
+        static const byte SHOOT_CHARGE_STEP_LENGTH = 4;
         bool playerUp = false;
         byte playerIFrames = 0;
 
@@ -1395,7 +1407,7 @@ namespace game {
             lcd_p->createChar(gfx::CHAR_FIRE, composedFire);
 
             // Életkarakter
-            byte juice[CHAR_HEIGHT];
+            byte juice[CHAR_HEIGHT] {};
             byte bitsLeft = playerHealth;
             for(byte y = 0; y < CHAR_HEIGHT && bitsLeft > 0; y++) {
                 for(byte x = 0; x < CHAR_WIDTH && bitsLeft > 0; x++) {
@@ -1504,6 +1516,14 @@ namespace game {
             advancePattern();
 
             updateBlockmap();
+            BlockmapFlags bm = getBlockmap(playerX(), playerY());
+            if((bm & BLOCKMAP_ENEMY) > 0) {
+                hitPlayer(DAMAGE_MELEE);
+            } else if((bm & BLOCKMAP_WALL) > 0) {
+                hitPlayer(DAMAGE_WALL, false);
+            } else if((bm & BLOCKMAP_FIRE) > 0) {
+                hitPlayer(DAMAGE_FIRE, false);
+            }
 
             dealShotDamages();
 
@@ -1541,22 +1561,31 @@ namespace game {
             }
         }
 
+
+        bool blockmapIndexValid(byte x, byte y) {
+            return x >= 0 && y >= 0 && x < LCD_WIDTH && y < LCD_HEIGHT;
+        }
+
         ::game::BlockmapFlags* indexBlockmap(byte x, byte y) {
 #if CONF_PANIC_BOUNDS
-            if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) panic(PANIC_BLOCKMAP_INDEX_OUT_OF_RANGE);
+            if(!blockmapIndexValid(x, y)) panic(PANIC_BLOCKMAP_INDEX_OUT_OF_RANGE);
 #endif
             return &blockmap[(y * LCD_WIDTH) + x];
         }
 
         ::game::BlockmapFlags getBlockmap(byte x, byte y) { return *indexBlockmap(x, y); }
 
+        ::game::BlockmapFlags safeGetBlockmap(byte x, byte y) {
+            if(blockmapIndexValid(x, y)) return blockmap[(y * LCD_WIDTH) + x];
+        }
+
         void safeDisjunctBlockmap(byte x, byte y, ::game::BlockmapFlags what) {
-            if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) return;
+            if(!blockmapIndexValid(x, y)) return;
             blockmap[(y * LCD_WIDTH) + x] = (BlockmapFlags)(blockmap[(y * LCD_WIDTH) + x] | what);
         }
 
         void safeConjunctBlockmap(byte x, byte y, ::game::BlockmapFlags what) {
-            if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) return;
+            if(!blockmapIndexValid(x, y)) return;
             blockmap[(y * LCD_WIDTH) + x] = (BlockmapFlags)(blockmap[(y * LCD_WIDTH) + x] & ~what);
         }
 
@@ -1582,13 +1611,22 @@ namespace game {
 
             // Élet
             *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
-            // Réteg
-            *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = "0123456789"[layerNumber];
+            // Réteg/chargeolás
+            char bottomCh = ' ';
+            if(shootCharge < SHOOT_CHARGE_STEP_LENGTH) {
+                bottomCh = "0123456789"[layerNumber];
+            } else {
+                if(!shootFullyCharged() || frameNumber % 8 >= 4) {
+                    bottomCh = ::gfx::SHOOT_CHARGE_CHARS[shootCharge / SHOOT_CHARGE_STEP_LENGTH];
+                }
+            }
+            *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = bottomCh;
         }
 
 
         byte playerX() const { return 0; }
         byte playerY() const { return playerUp ? 0 : 1; }
+        bool shootFullyCharged() const { return ::gfx::SHOOT_CHARGE_CHARS[shootCharge / SHOOT_CHARGE_STEP_LENGTH + 1] == '\0'; }
 
         void hitPlayer(byte unscaledDamage, bool grantIFrames) {
             if(playerIFrames > 0) return;
@@ -1611,6 +1649,7 @@ namespace game {
         void processPlayer() {
             if(playerIFrames > 0) playerIFrames--;
             if(parryCooldown > 0) parryCooldown--;
+            if(shootCooldown > 0) shootCooldown--;
 
             // TODO ground slam
             if(playerUp) {
@@ -1622,6 +1661,7 @@ namespace game {
             if(buttonsHeld.up) playerFrame = 0;
             else if(buttonsHeld.down) playerFrame = 2;
             else playerFrame = (stepTimer >= layer_p->framesPerStep() / 2) ? 1 : 0;
+
 
             if(buttonsPressed.right) {
                 bool parried = false;
@@ -1642,22 +1682,22 @@ namespace game {
                         }
                     }
                 }
-                parryCooldown = PARRY_LENGTH;
+                parryCooldown = PARRY_COOLDOWN;
 
-                if(!parried) {
-                    // TODO chargeable explosive shot
-                    // TODO cooldown on this maybe?
-                    shots.push(Shot(playerX(), playerY(), true, false));
-                }
+                if(!parried && shootCharge == 0) shootCharge = 1;
             }
 
-            BlockmapFlags bm = getBlockmap(playerX(), playerY());
-            if((bm & BLOCKMAP_ENEMY) > 0) {
-                hitPlayer(DAMAGE_MELEE);
-            } else if((bm & BLOCKMAP_WALL) > 0) {
-                hitPlayer(DAMAGE_WALL, false);
-            } else if((bm & BLOCKMAP_FIRE) > 0) {
-                hitPlayer(DAMAGE_FIRE, false);
+            if(buttonsReleased.right && shootCooldown <= 0 && shootCharge > 0) {
+                bool explosive = shootFullyCharged();
+                shots.push(Shot(playerX(), playerY(), true, explosive));
+                shootCharge = 0;
+                shootCooldown = SHOOT_COOLDOWN;
+            }
+
+            if(buttonsHeld.right && shootCharge > 0) {
+                if(!shootFullyCharged()) shootCharge++;
+            } else {
+                shootCharge = 0;
             }
         }
 
@@ -1731,7 +1771,7 @@ namespace game {
 
 
         bool hitObstacleAt(byte x, byte y) {
-            if((getBlockmap(x, y) & BLOCKMAP_WALL) == 0) return false;
+            if((safeGetBlockmap(x, y) & BLOCKMAP_WALL) == 0) return false;
 
             Obstacle* ent = NULL;
             byte i;
@@ -1758,20 +1798,22 @@ namespace game {
         }
 
         bool hitEnemyAt(byte x, byte y, byte violence) {
-            if((getBlockmap(x, y) & BLOCKMAP_ENEMY) == 0) return false;
+            if((safeGetBlockmap(x, y) & BLOCKMAP_ENEMY) == 0) return false;
             // TODO blood
 
             for(byte i = 0; i < filths.size(); i++) {
-                Filth* here = filths[i];
-                if(here->posX != x || here->posY != y) continue;
+                Filth* ent = filths[i];
+                if(ent->posX != x || ent->posY != y) continue;
                 filths.removeAt(i);
                 return true;
             }
 
             for(byte i = 0; i < imps.size(); i++) {
-                Imp* here = imps[i];
-                if(here->posX != x || here->posY != y) continue;
-                imps.removeAt(i);
+                Imp* ent = imps[i];
+                if(ent->posX != x || ent->posY != y) continue;
+
+                if(ent->health <= 1) imps.removeAt(i);
+                else ent->health--;
                 return true;
             }
 
@@ -1800,6 +1842,7 @@ namespace game {
             while(i > 0) {
                 i--;
                 Obstacle* ent = obstacles[i];
+
                 if(ent->posX == 0) obstacles.removeAt(i);
                 else ent->posX--;
             }
@@ -1808,6 +1851,7 @@ namespace game {
             while(i > 0) {
                 i--;
                 Filth* ent = filths[i];
+
                 if(ent->posX == 0) filths.removeAt(i);
                 else ent->posX--;
             }
@@ -1816,6 +1860,7 @@ namespace game {
             while(i > 0) {
                 i--;
                 Imp* ent = imps[i];
+
                 if(ent->posX == 0) imps.removeAt(i);
                 else ent->posX--;
             }
