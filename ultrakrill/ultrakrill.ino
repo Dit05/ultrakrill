@@ -126,136 +126,138 @@ void panic(byte code, const char* msg) {
 
 
 // Hacky generikus vektor
-#define GENERIC_VECTOR_DECL(T_NAME, T_TYPE, T_CAP) class T_NAME {\
-public:\
-    static const byte CAPACITY = T_CAP;\
-\
-    byte size() const { return size_m; }\
-    T_TYPE* operator [](byte index) {\
-        checkBounds(index);\
-        return &((T_TYPE*)buffer)[index];\
-    }\
-\
-    void removeAt(byte index) {\
-        checkBounds(index);\
-\
-        size_m--;\
-        for(int i = index; i < size_m; i++) {\
-            ((T_TYPE*)buffer)[i] = ((T_TYPE*)buffer)[i + 1];\
-        }\
-    }\
-\
-    void push(::T_TYPE elem) {\
-        if(size_m >= T_CAP) panic(PANIC_COLLECTION_FULL);\
-        ((T_TYPE*)buffer)[size_m] = elem;\
-        size_m++;\
-    }\
-\
-    ::T_TYPE pop() {\
-        if(size_m <= 0) panic(PANIC_COLLECTION_EMPTY);\
-        size_m--;\
-        return ((T_TYPE*)buffer)[size_m];\
-    }\
-\
-private:\
-    byte size_m = 0;\
-    byte buffer[T_CAP * sizeof(T_TYPE)] {};\
-\
-    void checkBounds(byte index) const {\
-        if(index < 0 || index >= size_m) panic(PANIC_COLLECTION_INDEX_OUT_OF_RANGE);\
-    }\
-}
+template<typename T, unsigned int CAP>
+class Vec {
+public:
+    static const byte CAPACITY = CAP;
+
+    byte size() const { return size_m; }
+    T* operator [](byte index) {
+        checkBounds(index);
+        return &((T*)buffer)[index];
+    }
+
+    void removeAt(byte index) {
+        checkBounds(index);
+
+        size_m--;
+        for(int i = index; i < size_m; i++) {
+            ((T*)buffer)[i] = ((T*)buffer)[i + 1];
+        }
+    }
+
+    void push(T elem) {
+        if(size_m >= CAP) panic(PANIC_COLLECTION_FULL);
+        ((T*)buffer)[size_m] = elem;
+        size_m++;
+    }
+
+    T pop() {
+        if(size_m <= 0) panic(PANIC_COLLECTION_EMPTY);
+        size_m--;
+        return ((T*)buffer)[size_m];
+    }
+
+private:
+    byte size_m = 0;
+    byte buffer[CAP * sizeof(T)] {};
+
+    void checkBounds(byte index) const {
+        if(index < 0 || index >= size_m) panic(PANIC_COLLECTION_INDEX_OUT_OF_RANGE);
+    }
+};
 
 
-#define GENERIC_LIST_DECL(T_NAME, T_TYPE) class T_NAME {\
-\
-public:\
-    unsigned int capacity() const { return capacity_m; }\
-    unsigned int size() const { return size_m; }\
-    ::T_TYPE* rawPtr() const { return ptr_m; }\
-\
-\
-    T_NAME(unsigned int capacity) {\
-        capacity_m = 0;\
-        size_m = 0;\
-        ptr_m = NULL;\
-        resize(capacity);\
-    }\
-\
-    T_NAME() {\
-        capacity_m = 0;\
-        size_m = 0;\
-        ptr_m = NULL;\
-        resize(4);\
-    }\
-\
-\
-    void resize(unsigned int newCapacity) {\
-        T_TYPE* old_ptr = ptr_m;\
-\
-        ptr_m = (T_TYPE*)operator new[](newCapacity);\
-        if(ptr_m == NULL) {\
-            ptr_m = old_ptr;\
-            panic(PANIC_ALLOCATION_FAILED, "List");\
-            return;\
-        }\
-\
-        memcpy(ptr_m, old_ptr, sizeof(T_TYPE) * min(capacity_m, newCapacity));\
-        capacity_m = newCapacity;\
-        delete[] old_ptr;\
-    }\
-\
-    void reserve(unsigned int capacity) {\
-        unsigned int newCap = capacity_m;\
-        while(newCap < capacity) newCap *= 2;\
-        if(newCap != capacity_m) resize(newCap);\
-    }\
-\
-    void shrinkToFit() {\
-        resize(size_m);\
-    }\
-\
-\
-    T_TYPE* operator[](unsigned int index) const {\
-        checkBounds(index);\
-        return &ptr_m[index];\
-    }\
-\
-\
-    void push(::T_TYPE elem) {\
-        if(size_m >= capacity_m) resize(capacity_m * 2);\
-        ptr_m[size_m++] = elem;\
-    }\
-\
-    ::T_TYPE pop() {\
-        if(size_m <= 0) panic(PANIC_COLLECTION_EMPTY, "");\
-        return ptr_m[--size_m];\
-    }\
-\
-    void removeAt(byte index) {\
-        checkBounds(index);\
-\
-        size_m--;\
-        for(unsigned int i = index; i < size_m; i++) {\
-            ptr_m[i] = ptr_m[i + 1];\
-        }\
-    }\
-\
-\
-private:\
-    T_TYPE* ptr_m;\
-    unsigned int capacity_m;\
-    unsigned int size_m;\
-\
-    void checkBounds(unsigned int index) const {\
-        if(index < 0 || index >= size_m) panic(PANIC_COLLECTION_INDEX_OUT_OF_RANGE);\
-    }\
-\
-}
+template<typename T>
+class List {
 
-GENERIC_LIST_DECL(List_byte, byte);
-typedef unsigned int typedef_unsigned_int; // Egy szónak kell lennie, mert a `::unsigned int` az syntax error lenne.
-GENERIC_LIST_DECL(List_uint, typedef_unsigned_int);
+public:
+    unsigned int capacity() const { return capacity_m; }
+    unsigned int size() const { return size_m; }
+    T* rawPtr() const { return ptr_m; }
+
+
+    List(unsigned int capacity) {
+        capacity_m = 0;
+        size_m = 0;
+        ptr_m = NULL;
+        resize(capacity);
+    }
+
+    List() {
+        capacity_m = 0;
+        size_m = 0;
+        ptr_m = NULL;
+        resize(4);
+    }
+
+    ~List() {
+        if(ptr_m != NULL) delete[] ptr_m;
+    }
+
+
+    void resize(unsigned int newCapacity) {
+        T* old_ptr = ptr_m;
+
+        ptr_m = (T*)operator new[](newCapacity * sizeof(T));
+        if(ptr_m == NULL) {
+            ptr_m = old_ptr;
+            panic(PANIC_ALLOCATION_FAILED, "List");
+            return;
+        }
+
+        memcpy(ptr_m, old_ptr, sizeof(T) * min(capacity_m, newCapacity));
+        capacity_m = newCapacity;
+        delete[] old_ptr;
+    }
+
+    void reserve(unsigned int capacity) {
+        unsigned int newCap = capacity_m;
+        while(newCap < capacity) newCap *= 2;
+        if(newCap != capacity_m) resize(newCap);
+    }
+
+    void shrinkToFit() {
+        resize(size_m);
+    }
+
+
+    T* operator[](unsigned int index) const {
+        checkBounds(index);
+        return &ptr_m[index];
+    }
+
+
+    void push(T elem) {
+        if(size_m >= capacity_m) resize(capacity_m * 2);
+        ptr_m[size_m++] = elem;
+    }
+
+    T pop() {
+        if(size_m <= 0) panic(PANIC_COLLECTION_EMPTY, "");
+        return ptr_m[--size_m];
+    }
+
+    void removeAt(byte index) {
+        checkBounds(index);
+
+        size_m--;
+        for(unsigned int i = index; i < size_m; i++) {
+            ptr_m[i] = ptr_m[i + 1];
+        }
+    }
+
+
+private:
+    T* ptr_m;
+    unsigned int capacity_m;
+    unsigned int size_m;
+
+    void checkBounds(unsigned int index) const {
+        if(index < 0 || index >= size_m) panic(PANIC_COLLECTION_INDEX_OUT_OF_RANGE);
+    }
+
+};
 
 
 // https://en.wikipedia.org/wiki/Linear-feedback_shift_register nyomán.
@@ -811,7 +813,6 @@ namespace game {
             this->explosive = explosive;
         }
     };
-    GENERIC_VECTOR_DECL(Vec_Shot_48, game::Shot, 48);
 
     struct Filth : public Entity {
         Filth(byte posX, byte posY) {
@@ -819,7 +820,6 @@ namespace game {
             this->posY = posY;
         }
     };
-    GENERIC_VECTOR_DECL(Vec_Filth_32, game::Filth, 32);
 
     struct Imp : public Entity {
         byte health = 3;
@@ -829,7 +829,6 @@ namespace game {
             this->posY = posY;
         }
     };
-    GENERIC_VECTOR_DECL(Vec_Imp_32, game::Imp, 32);
 
 
     enum ObstacleKind : byte {
@@ -949,7 +948,6 @@ namespace game {
         }
 
     };
-    GENERIC_LIST_DECL(List_Tile, game::Tile);
 
     struct Pattern {
         byte tileCount;
@@ -1039,9 +1037,9 @@ namespace game {
         }
 
     private:
-        List_Tile tiles {}; // Az összes tile egyben.
-        List_byte offsets {}; // Melyik pattern hol kezdődik.
-        List_uint marks {}; // Melyik kategória hol kezdődik.
+        List<Tile> tiles {}; // Az összes tile egyben.
+        List<byte> offsets {}; // Melyik pattern hol kezdődik.
+        List<unsigned int> marks {}; // Melyik kategória hol kezdődik.
 
         static byte untilNextColumn(const char* top_p, const char* bottom_p) {
             byte count = 0;
@@ -1088,10 +1086,20 @@ namespace game {
         patterns.add(" ",
                      "E");
 
-        patterns.mark(); // 1.
+        patterns.mark(); // 0.
 
         patterns.add(" x ",
                      "Eee");
+
+        patterns.mark(); // 1.
+        patterns.mark(); // 2.
+        patterns.mark(); // 3.
+        patterns.mark(); // 4.
+        patterns.mark(); // 5.
+        patterns.mark(); // 6.
+        patterns.mark(); // 7.
+        patterns.mark(); // 8.
+        patterns.mark(); // 9.
 
 
         return patterns;
@@ -1390,12 +1398,12 @@ namespace game {
 
 
         BlockmapFlags blockmap[LCD_WIDTH * LCD_HEIGHT];
-        Vec_Shot_48 shots {};
+        Vec<Shot, 48> shots {};
         Scroller obstacleMap {};
         Scroller smokeMap {};
         Scroller bloodMap {};
-        Vec_Filth_32 filths {};
-        Vec_Imp_32 imps {};
+        Vec<Filth, 32> filths {};
+        Vec<Imp, 32> imps {};
         byte impTimer = 0;
 
 
