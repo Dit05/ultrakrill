@@ -270,6 +270,12 @@ public:
         warmup(20); // "Bemelegítés: 20 fekvőtámasz"
     }
 
+
+    void reseed(uint16_t seed) {
+        if(seed == 0) seed++;
+        lfsr = seed;
+    }
+
     void warmup(unsigned int steps) {
         while(steps --> 0) nextBit();
     }
@@ -1014,7 +1020,11 @@ namespace game {
         game::Pattern get(unsigned int index) const {
             Pattern pat;
             pat.tiles = tiles[*offsets[index]];
-            pat.tileCount = ((index >= size() - 1) ? size() : (unsigned int)*offsets[index + 1]) - (unsigned int)*offsets[index]; // Különbség ezen- és a következő offset közt = count.
+
+            unsigned int begin = *offsets[index];
+            unsigned int end = (index + 1 < offsets.size()) ? *offsets[index + 1] : *offsets[offsets.size() - 1];
+
+            pat.tileCount = end - begin; // Különbség ezen- és a következő offset közt = count.
             return pat;
         }
 
@@ -1061,6 +1071,7 @@ namespace game {
 
 
     ::game::PatternArray createDefaultPatterns() {
+        // TODO több pattern?
         // Itt van minden, hogy a string literálok hátha nem szennyezik a RAM-ot statikus változóként.
         PatternArray patterns;
 
@@ -1086,20 +1097,83 @@ namespace game {
         patterns.add(" ",
                      "E");
 
-        patterns.mark(); // 0.
+        patterns.mark(); // 0. (Limbo)
 
         patterns.add(" x ",
                      "Eee");
 
-        patterns.mark(); // 1.
-        patterns.mark(); // 2.
-        patterns.mark(); // 3.
-        patterns.mark(); // 4.
-        patterns.mark(); // 5.
-        patterns.mark(); // 6.
-        patterns.mark(); // 7.
-        patterns.mark(); // 8.
-        patterns.mark(); // 9.
+        patterns.add("E",
+                     "Z");
+
+        patterns.add("fff",
+                     "zzz");
+
+        patterns.mark(); // 1. (Lust)
+
+        patterns.add("ZZZ",
+                     "ZZZ");
+        patterns.add("ff",
+                     "ff");
+
+        patterns.mark(); // 2. (Gluttony)
+
+        patterns.add("      IY",
+                     "ZWWWZ   ");
+        patterns.add("",
+                     "");
+
+        patterns.mark(); // 3. (Greed)
+
+        patterns.add(" zez ",
+                     "zZFZz");
+        patterns.add(" Z ",
+                     "ZVZ");
+        patterns.add(" X ",
+                     "XXX");
+
+        patterns.mark(); // 4. (Wrath)
+
+        patterns.add("   w   ",
+                     "w  y  w");
+        patterns.add("w  y  w",
+                     "   w   ");
+        patterns.add("yzy",
+                     "www");
+        patterns.add(" e ",
+                     "WWW");
+        patterns.add("     ",
+                     "XZVZX");
+        patterns.add("XZZZX",
+                     "     ");
+        patterns.add("     ZXXx",
+                     "xXXZ     ");
+        patterns.add("xXXZ     ",
+                     "     ZXXx");
+
+        patterns.mark(); // 5. (Heresy)
+
+        patterns.add("Z  f  Z",
+                     "ZWfffWZ");
+        patterns.add("  iZ",
+                     "  iZ");
+
+        patterns.mark(); // 6. (Violence)
+
+        patterns.add(" fff ",
+                     "fFEFf");
+        patterns.add("X",
+                     "X");
+
+        patterns.mark(); // 7. (Fraud)
+
+        patterns.add("yyzZzyy",
+                     "Ww w wW");
+        patterns.add("yXXy",
+                     "yXXy");
+        patterns.add("XeEe",
+                     "XeEe");
+
+        patterns.mark(); // 8. (Treachery)
 
 
         return patterns;
@@ -1137,12 +1211,12 @@ namespace game {
     const Layer LAYERS[LAYER_COUNT] {
         Layer(90, 12, "LIMBO", 6, 10),
         Layer(100, 10, "LUST", 3, 8),
-        Layer(200, 8, "GLUTTONY", 2, 7),
+        Layer(250, 8, "GLUTTONY", 2, 7),
         Layer(400, 7, "GREED", 2, 6),
-        Layer(800, 6, "WRATH", 1, 6),
-        Layer(1600, 5, "HERESY", 1, 5),
-        Layer(3200, 4, "VIOLENCE", 1, 4),
-        Layer(4800, 3, "FRAUD", 0, 4),
+        Layer(600, 6, "WRATH", 2, 6),
+        Layer(1000, 5, "HERESY", 1, 5),
+        Layer(1500, 4, "VIOLENCE", 1, 4),
+        Layer(2149, 3, "FRAUD", 1, 3),
         Layer(0xffff, 2, "TREACHERY", 0, 3)
     }; // A leghosszabb név 9 betű. A frames per step legyen páros, hogy a shotok tudjanak a felénél lépni.
 
@@ -1175,7 +1249,7 @@ namespace game {
 
         void shiftLeft() {
             scroll++;
-            if(scroll >= WIDTH) scroll -= WIDTH;
+            scroll %= WIDTH;
         }
 
         void shiftLeft(byte fillWith) {
@@ -1193,7 +1267,7 @@ namespace game {
 
     public:
 
-        Game(uint16_t seed) : levelRandom(seed) {
+        Game(uint16_t seed) : levelSeed(seed) {
             bufferB.clear();
 
             switchLayer(0);
@@ -1335,11 +1409,6 @@ namespace game {
             0b00000
         };
 
-        /*const byte TILE_EMPTY = ' ';
-        const byte TILE_WALL = gfx::CHAR_WALL;
-        const byte TILE_CRACKED_WALL = gfx::CHAR_CRACKED_WALL;
-        const byte TILE_FIRE = gfx::CHAR_FIRE; TODO ezek miért léteztek? */
-
         Buttons buttonsHeld = {};
         Buttons buttonsPressed = {};
         Buttons buttonsReleased = {};
@@ -1364,7 +1433,8 @@ namespace game {
 
 
         const game::PatternArray patterns = game::createDefaultPatterns();
-        ::Random levelRandom;
+        const uint16_t levelSeed;
+        ::Random levelRandom { 0 };
         const game::Layer* layer_p;
         byte layerNumber = 0;
         unsigned int layerStepsLeft = 0;
@@ -1390,6 +1460,7 @@ namespace game {
 
         static const byte MAX_HEALTH = CHAR_WIDTH * CHAR_HEIGHT;
         byte playerHealth = MAX_HEALTH;
+        byte playerHealthFlash = 0;
 
         static const byte DAMAGE_MELEE = 10;
         static const byte DAMAGE_WALL = 4;
@@ -1459,15 +1530,17 @@ namespace game {
             lcd_p->createChar(gfx::CHAR_FIRE, composedFire);
 
             // Életkarakter
-            byte juice[CHAR_HEIGHT] {};
-            byte bitsLeft = playerHealth;
-            for(byte y = 0; y < CHAR_HEIGHT && bitsLeft > 0; y++) {
-                for(byte x = 0; x < CHAR_WIDTH && bitsLeft > 0; x++) {
-                    juice[y] |= 1 << (CHAR_WIDTH - x - 1);
-                    bitsLeft--;
+            if(playerHealthFlash == 0) {
+                byte juice[CHAR_HEIGHT] {};
+                byte bitsLeft = playerHealth;
+                for(byte y = 0; y < CHAR_HEIGHT && bitsLeft > 0; y++) {
+                    for(byte x = 0; x < CHAR_WIDTH && bitsLeft > 0; x++) {
+                        juice[y] |= 1 << (CHAR_WIDTH - x - 1);
+                        bitsLeft--;
+                    }
                 }
+                lcd_p->createChar(gfx::CHAR_HEALTH, juice);
             }
-            lcd_p->createChar(gfx::CHAR_HEALTH, juice);
         }
 
 
@@ -1483,7 +1556,11 @@ namespace game {
             showBanner(msg);
 
             pattern = Pattern { 0, NULL };
+            patternProgress = 0;
             patternPause += LAYER_INTERMISSION;
+
+            levelRandom.reseed(levelSeed + layerNumber * 149);
+            levelRandom.warmup(20);
         }
 
         game::Pattern getRandomPattern() {
@@ -1496,8 +1573,9 @@ namespace game {
 
             if(patternPause > 0) patternPause--;
             while(true) {
-                while(patternProgress >= pattern.tileCount) {
+                while(pattern.tiles == NULL || patternProgress >= pattern.tileCount) {
                     pattern = getRandomPattern();
+
                     patternProgress = 0;
 
                     byte pause = layer_p->minPause() + levelRandom.nextUint8(layer_p->maxPause() - layer_p->minPause());
@@ -1580,7 +1658,6 @@ namespace game {
 
         void stepAllway() {
             stepLevel();
-            advancePattern();
 
             updateBlockmap();
             BlockmapFlags bm = getBlockmap(playerX(), playerY());
@@ -1670,7 +1747,14 @@ namespace game {
             }
 
             // Élet
-            *frame_p->index(LCD_WIDTH - 1, 0) = ::gfx::CHAR_HEALTH;
+            char topCh = ' ';
+            if(playerHealthFlash > 0) {
+                topCh = '!';
+                playerHealthFlash--;
+            } else {
+                topCh = ::gfx::CHAR_HEALTH;
+            }
+            *frame_p->index(LCD_WIDTH - 1, 0) = topCh;
             // Réteg/chargeolás
             char bottomCh = ' ';
             if(shootCharge < SHOOT_CHARGE_STEP_LENGTH) {
@@ -1694,6 +1778,8 @@ namespace game {
 
             if(playerHealth >= unscaledDamage) playerHealth -= unscaledDamage;
             else playerHealth = 0;
+
+            playerHealthFlash = 4;
             // TODO skálázás nehézséggel
             //showBanner(String("Ouch!"));
         }
@@ -1828,8 +1914,10 @@ namespace game {
                 if(ent->explosive) {
                     // Direkt nem sebzünk, mert a robbanás violentebb és több vért csinál.
                     if(
-                        (obstacleMap.indexValid(ent->posX, ent->posY) && *obstacleMap.index(ent->posX, ent->posY) != OBSTACLE_EMPTY)
-                        || ((safeGetBlockmap(ent->posX, ent->posY) & BLOCKMAP_ENEMY) != 0)
+                        (obstacleMap.indexValid(ent->posX, ent->posY)
+                         && *obstacleMap.index(ent->posX, ent->posY) != OBSTACLE_EMPTY
+                         && *obstacleMap.index(ent->posX, ent->posY) != OBSTACLE_FIRE
+                        ) || ((safeGetBlockmap(ent->posX, ent->posY) & BLOCKMAP_ENEMY) != 0)
                     ) {
                         explodeAt(ent->posX, ent->posY);
                         impacted = true;
@@ -1905,7 +1993,7 @@ namespace game {
                 Filth* ent = filths[i];
                 if(ent->posX != x || ent->posY != y) continue;
 
-                createBloodAt(ent->posX, ent->posY, 64 * violence);
+                createBloodAt(ent->posX, ent->posY, 96 * violence);
                 filths.removeAt(i);
 
                 return 1;
@@ -1916,7 +2004,7 @@ namespace game {
                 if(ent->posX != x || ent->posY != y) continue;
 
                 if(ent->health <= maxHits) {
-                    createBloodAt(ent->posX, ent->posY, 96 * violence);
+                    createBloodAt(ent->posX, ent->posY, 128 * violence);
                     imps.removeAt(i);
                     return ent->health;
                 } else {
@@ -1980,7 +2068,6 @@ namespace game {
                 for(byte x = 0; x < LCD_WIDTH; x++) {
                     byte blood = *bloodMap.index(x, y);
 
-                    // TODO flicker based on amount
                     char ch;
                     byte flickerPhase = frameNumber / 2;
 
@@ -2030,6 +2117,8 @@ namespace game {
                 if(ent->posX == 0) imps.removeAt(i);
                 else ent->posX--;
             }
+
+            advancePattern();
         }
 
 
@@ -2042,6 +2131,15 @@ namespace game {
 
         void stepFilths() {
             filthFrame = (filthFrame + 1) % 2;
+            for(byte i = 0; i < filths.size(); i++) {
+                Filth* ent = filths[i];
+
+                if(ent->posY >= 1) continue;
+                if(*obstacleMap.index(ent->posX, ent->posY + 1) != OBSTACLE_EMPTY) continue;
+                if(getBlockmap(ent->posX, ent->posY + 1) != BLOCKMAP_NOTHING) continue;
+
+                ent->posY++;
+            }
         }
 
 
@@ -2062,13 +2160,24 @@ namespace game {
                 impFrame = (impTimer / 2) % 2;
             }
 
+            if(impTimer <= 8 && impTimer % 2 == 0) {
+                for(byte i = 0; i < imps.size(); i++) {
+                    Imp* ent = imps[i];
+
+                    if(ent->posX >= LCD_WIDTH - 1) continue;
+                    if(*obstacleMap.index(ent->posX + 1, ent->posY) != OBSTACLE_EMPTY) continue;
+                    if(getBlockmap(ent->posX + 1, ent->posY) != BLOCKMAP_NOTHING) continue;
+
+                    ent->posX++;
+                }
+            }
+
             if(impTimer == 0) {
                 for(byte i = 0; i < imps.size(); i++) {
                     Imp* ent = imps[i];
                     if(ent->posX > 0) shots.push(Shot(ent->posX - 1, ent->posY, false, false));
                 }
             }
-            // TODO
         }
     };
 

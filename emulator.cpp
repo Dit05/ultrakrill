@@ -170,9 +170,9 @@ private:
 int digitalRead(unsigned char pin) {
     const bool* keyboard = SDL_GetKeyboardState(NULL);
     switch(pin) {
-        case 8: return !keyboard[SDL_SCANCODE_DOWN];
-        case 9: return !keyboard[SDL_SCANCODE_UP];
-        case 10: return !keyboard[SDL_SCANCODE_RIGHT];
+        case 8: return !(keyboard[SDL_SCANCODE_DOWN] || keyboard[SDL_SCANCODE_S]);
+        case 9: return !(keyboard[SDL_SCANCODE_UP] || keyboard[SDL_SCANCODE_W]);
+        case 10: return !(keyboard[SDL_SCANCODE_RIGHT] || keyboard[SDL_SCANCODE_SPACE]);
     }
     return 0;
 }
