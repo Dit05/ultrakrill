@@ -1087,17 +1087,25 @@ namespace game {
         patterns.add("     ",
                      "ZWWWZ");
 
-        patterns.add("Y",
-                     "Z");
-        patterns.add("Z",
-                     "Y");
+        patterns.add("y",
+                     "z");
+        patterns.add("z",
+                     "y");
         patterns.add("y",
                      "y");
 
         patterns.add(" ",
-                     "E");
+                     "F");
+
+        patterns.add("I",
+                     " ");
 
         patterns.mark(); // 0. (Limbo)
+
+        patterns.add("I",
+                     " ");
+        patterns.add(" ",
+                     "E");
 
         patterns.add(" x ",
                      "Eee");
@@ -1119,8 +1127,8 @@ namespace game {
 
         patterns.add("      IY",
                      "ZWWWZ   ");
-        patterns.add("",
-                     "");
+        patterns.add("I",
+                     "W");
 
         patterns.mark(); // 3. (Greed)
 
