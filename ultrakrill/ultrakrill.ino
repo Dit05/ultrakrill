@@ -674,6 +674,75 @@ namespace gfx {
 
         const byte FLASH_FRAMES = 4;
 
+
+        const byte CROSSBONE_TOP[CHAR_HEIGHT] = {
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00000,
+            0b00001,
+            0b00001,
+            0b00001,
+            0b00000
+        };
+
+        const byte CROSSBONE_BOTTOM[CHAR_HEIGHT] = {
+            0b01100,
+            0b11110,
+            0b00011,
+            0b00000,
+            0b10011,
+            0b01111,
+            0b01100,
+            0b10000
+        };
+
+
+        const byte SKULL1_TOP[CHAR_HEIGHT] = {
+            0b00000,
+            0b01111,
+            0b11111,
+            0b11111,
+            0b11111,
+            0b10001,
+            0b10001,
+            0b11001
+        };
+
+        const byte SKULL1_BOTTOM[CHAR_HEIGHT] = {
+            0b11111,
+            0b01110,
+            0b00111,
+            0b01010,
+            0b01111,
+            0b00111,
+            0b00000,
+            0b00000
+        };
+
+
+        const byte SKULL2_TOP[CHAR_HEIGHT] = {
+            0b00000,
+            0b00000,
+            0b01111,
+            0b11111,
+            0b11001,
+            0b10001,
+            0b10001,
+            0b11111
+        };
+
+        const byte SKULL2_BOTTOM[CHAR_HEIGHT] = {
+            0b11110,
+            0b00111,
+            0b01010,
+            0b00000,
+            0b01010,
+            0b01111,
+            0b00111,
+            0b00000
+        };
+
         /*
         const byte TEMPLATE[CHAR_HEIGHT] = {
             0b00000,
