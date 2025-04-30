@@ -287,6 +287,7 @@ typedef unsigned char byte;
 #define min std::min
 #define max std::max
 #define isLowerCase(x) (tolower(x) == x)
+#define F(x) x
 HardwareSerial Serial;
 #include "ultrakrill/ultrakrill.ino"
 #undef LCD_EMULATOR

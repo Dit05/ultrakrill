@@ -11,10 +11,12 @@
 // - Csak akkor értelmezi a classban a struct paraméteres metódust, ha fully qualified az útvonala, tehát NEM JÓ a LiquidCrystal, ::LiquidCrystal kell.
 // - A virtual method csak úgy parsolódik helyesen, ha {} helyett = 0;.
 // - invalid header file = nem is invalid, csak van valami egyéb hiba amit nem mond el, és includeolva van az EEPROM.h.
+// - Bizonyos sketch méret fölött egyszerűen nem hajlandó elhinni, hogy ráfér a flashre... (utolsó óceán a pohárban)
 // TODO a valóságban változik az LCD, ha csak custom characterek definíciói változtak, de nem volt semmi write?
 
 // Konfigurációs DEFINEok
 #define CONF_DEBUG_LOGGING 1
+#define CONF_DEBUG_LOG_PUSH_FAILURES 1
 
 #define CONF_PANIC_BOUNDS 1
 #define CONF_PANIC_LAG 0
@@ -90,7 +92,7 @@ const byte PANIC_SCROLLER_INDEX_OUT_OF_RANGE = 9;
 
 // Végtelen ciklusban villogja le a megadott `code`-ot.
 void panic(byte code) {
-    Serial.print("Panic code: ");
+    Serial.print(F("Panic code: "));
     Serial.println(code);
 
 #ifdef LCD_EMULATOR
@@ -117,8 +119,9 @@ void panic(byte code) {
 }
 
 // Mint a sima, csak még pluszba elküld egy üzenet Serial-on.
-void panic(byte code, const char* msg) {
-    Serial.print("Panic message: ");
+template<typename T>
+void panic(byte code, const T msg) {
+    Serial.print(F("Panic message: "));
     Serial.println(msg);
     panic(code);
 }
@@ -146,10 +149,26 @@ public:
         }
     }
 
-    void push(T elem) {
-        if(size_m >= CAP) panic(PANIC_COLLECTION_FULL);
+    bool tryPush(T elem) {
+        if(size_m >= CAP) return false;
         ((T*)buffer)[size_m] = elem;
         size_m++;
+    }
+
+    void push(T elem) {
+        if(!tryPush(elem)) panic(PANIC_COLLECTION_FULL);
+    }
+
+    // Returns whether pushing was done forcefuly.
+    bool forcePush(T elem) {
+        if(size_m >= CAP) {
+            ((T*)buffer)[size_m] = elem;
+            return true;
+        } else {
+            ((T*)buffer)[size_m] = elem;
+            size_m++;
+            return false;
+        }
     }
 
     T pop() {
@@ -199,10 +218,12 @@ public:
     void resize(unsigned int newCapacity) {
         T* old_ptr = ptr_m;
 
-        ptr_m = (T*)operator new[](newCapacity * sizeof(T));
+        unsigned int size = newCapacity * sizeof(T);
+        DEBUG_LOG_CAPTIONED(F("List realloc "), size);
+        ptr_m = (T*)operator new[](size);
         if(ptr_m == NULL) {
             ptr_m = old_ptr;
-            panic(PANIC_ALLOCATION_FAILED, "List");
+            panic(PANIC_ALLOCATION_FAILED, F("List"));
             return;
         }
 
@@ -437,9 +458,6 @@ namespace gfx {
     const byte SMOKE_MAX = strlen(SMOKE) - 1;
 
     const char BLOOD = '#';
-
-    const char* DIE_PALETTE = "0123456789abcdef";
-    const byte DIE_PALETTE_LENGTH = strlen(DIE_PALETTE);
 
     const char* DIE_PHRASES[] {
         "INSUFFICIENT",
@@ -788,9 +806,9 @@ namespace gfx {
 #if CONF_PANIC_BOUNDS == 1
             if(x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) {
                 auto msg = String();
-                msg += "Indexing Frame out of range with x=";
+                msg += F("Indexing Frame out of range with x=");
                 msg += x;
-                msg += ", y=";
+                msg += F(", y=");
                 msg += y;
                 panic(PANIC_FRAME_INDEX_OUT_OF_RANGE, msg.c_str());
             }
@@ -998,23 +1016,23 @@ namespace game {
         String toString() {
             String str {};
 
-            if(isOptional()) str += "optional ";
-            if(isTop()) str += "top ";
-            else str += "bottom ";
+            if(isOptional()) str += F("optional ");
+            if(isTop()) str += F("top ");
+            else str += F("bottom ");
 
             switch(getWhat()) {
-                case TILE_ENTITY_FIRE: str += "fire"; break;
-                case TILE_ENTITY_CRACKED_WALL: str += "cracked wall"; break;
-                case TILE_ENTITY_WALL: str += "wall"; break;
-                case TILE_ENTITY_CRACKED_WALL_OR_WALL: str += "cracked/regular wall"; break;
-                case TILE_ENTITY_CRACKED_WALL_OR_FIRE: str += "cracked wall/fire"; break;
-                case TILE_ENTITY_FILTH: str += "filth"; break;
-                case TILE_ENTITY_IMP: str += "imp"; break;
-                case TILE_ENTITY_IMP_OR_FILTH: str += "imp/filth"; break;
-                default: str += "invalid value"; break;
+                case TILE_ENTITY_FIRE: str += F("fire"); break;
+                case TILE_ENTITY_CRACKED_WALL: str += F("cracked wall"); break;
+                case TILE_ENTITY_WALL: str += F("wall"); break;
+                case TILE_ENTITY_CRACKED_WALL_OR_WALL: str += F("cracked/regular wall"); break;
+                case TILE_ENTITY_CRACKED_WALL_OR_FIRE: str += F("cracked wall/fire"); break;
+                case TILE_ENTITY_FILTH: str += F("filth"); break;
+                case TILE_ENTITY_IMP: str += F("imp"); break;
+                case TILE_ENTITY_IMP_OR_FILTH: str += F("imp/filth"); break;
+                default: str += F("invalid value"); break;
             }
 
-            str += ", moves: ";
+            str += F(", moves: ");
             str += getMoves();
 
             return str;
@@ -1093,7 +1111,7 @@ namespace game {
                 case 'e': case 'E': return TILE_ENTITY_IMP_OR_FILTH;
                 default:
                     String str {};
-                    str += "Invalid TileEntity: ";
+                    str += F("Invalid TileEntity: ");
                     str += ch;
                     panic(PANIC_INVALID_ENUM, str.c_str());
                     return TILE_ENTITY_FIRE;
@@ -1122,6 +1140,13 @@ namespace game {
             pat.tileCount = end - begin; // Különbség ezen- és a következő offset közt = count.
             return pat;
         }
+
+        void resizeTiles(unsigned int size) { tiles.resize(size); }
+        unsigned int tilesSize() { return tiles.size(); }
+        void resizeMarks(unsigned int size) { marks.resize(size); }
+        unsigned int marksSize() { return marks.size(); }
+        void resizeOffsets(unsigned int size) { offsets.resize(size); }
+        unsigned int offsetsSize() { return offsets.size(); }
 
         unsigned int markCount() const { return marks.size(); }
         unsigned int getMark(unsigned int index) const {
@@ -1169,6 +1194,9 @@ namespace game {
         // TODO több pattern?
         // Itt van minden, hogy a string literálok hátha nem szennyezik a RAM-ot statikus változóként.
         PatternArray patterns;
+        patterns.resizeTiles(158);
+        patterns.resizeOffsets(33);
+        patterns.resizeMarks(9);
 
         // W: tűz
         // X: teljes fal
@@ -1277,6 +1305,9 @@ namespace game {
                      "XeEe");
 
         patterns.mark(); // 8. (Treachery)
+        DEBUG_LOG_CAPTIONED(F("Pattern tiles: "), patterns.tilesSize());
+        DEBUG_LOG_CAPTIONED(F("Pattern offsets: "), patterns.offsetsSize());
+        DEBUG_LOG_CAPTIONED(F("Pattern marks: "), patterns.marksSize());
 
 
         return patterns;
@@ -1367,11 +1398,11 @@ namespace game {
 
 
     struct Stats {
-        unsigned long steps = 0;
-        unsigned long shots = 0;
-        unsigned long parries = 0;
-        unsigned long damageTaken = 0;
-        unsigned long healingTaken = 0;
+        unsigned int steps = 0;
+        unsigned int shots = 0;
+        unsigned int parries = 0;
+        unsigned int damageTaken = 0;
+        unsigned int healingTaken = 0;
     };
 
 
@@ -1401,7 +1432,7 @@ namespace game {
 
         void suspend() { /* do nothing */ }
 
-        void resume(::LiquidCrystal* lcd_p) = 0;
+        void resume(::LiquidCrystal* lcd_p) {};
 
     private:
         const Stats stats;
@@ -1458,6 +1489,7 @@ namespace game {
                 dieTimer++;
                 if(dieTimer > 30) {
                     *changeScene = new ::game::SkullScene(stats);
+                    if(*changeScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("SkullScene"));
                 }
                 return;
             }
@@ -1507,7 +1539,7 @@ namespace game {
 
         void draw(::LiquidCrystal* lcd_p) {
             if(dieTimer > 0) {
-                *frame_p->index(effectRandom.nextUint8(LCD_WIDTH), effectRandom.nextUint8(LCD_HEIGHT)) = ::gfx::DIE_PALETTE[effectRandom.nextUint8(::gfx::DIE_PALETTE_LENGTH)];
+                *frame_p->index(effectRandom.nextUint8(LCD_WIDTH), effectRandom.nextUint8(LCD_HEIGHT)) = ::gfx::HEX_DIGITS[effectRandom.nextUint8(16)];
 
                 if(dieTimer % 4 == 0) {
                     byte x = effectRandom.nextUint8(LCD_WIDTH);
@@ -1735,11 +1767,12 @@ namespace game {
 
 
         void switchLayer(byte num) {
+            DEBUG_LOG_CAPTIONED(F("Layer "), num);
             layerNumber = num;
             layer_p = &LAYERS[num];
             layerStepsLeft = layer_p->length();
 
-            String msg("LAYER ");
+            String msg(F("LAYER "));
             msg += num;
             msg += ": ";
             msg += layer_p->name();
@@ -1803,11 +1836,19 @@ namespace game {
                         goto sw;
 
                     case TILE_ENTITY_FILTH:
-                        filths.push(Filth(x, y));
+                        if(!filths.tryPush(Filth(x, y))) {
+#if CONF_DEBUG_LOG_PUSH_FAILURES
+                            DEBUG_LOG(F("tryPush Filth failed"));
+#endif
+                        }
                         break;
 
                     case TILE_ENTITY_IMP:
-                        imps.push(Imp(x, y));
+                        if(!imps.tryPush(Imp(x, y))) {
+#if CONF_DEBUG_LOG_PUSH_FAILURES
+                            DEBUG_LOG(F("tryPush Imp failed"));
+#endif
+                        }
                         break;
 
                     case TILE_ENTITY_IMP_OR_FILTH:
@@ -1935,7 +1976,7 @@ namespace game {
                     bottomCh = ::gfx::SHOOT_CHARGE_CHARS[shootCharge / SHOOT_CHARGE_STEP_LENGTH];
                 }
             } else {
-                bottomCh = "0123456789"[layerNumber];
+                bottomCh = '0' + layerNumber;
             }
             *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = bottomCh;
         }
@@ -2026,7 +2067,11 @@ namespace game {
             // Lövés
             if(buttonsReleased.right && shootCooldown <= 0 && shootCharge > 0) {
                 bool explosive = shootFullyCharged();
-                shots.push(Shot(playerX(), playerY(), true, explosive));
+                if(shots.forcePush(Shot(playerX(), playerY(), true, explosive))) {
+#if CONF_DEBUG_LOG_PUSH_FAILURES
+                    DEBUG_LOG(F("Force pushed player shot"));
+#endif
+                }
                 shootCharge = 0;
                 shootCooldown = SHOOT_COOLDOWN;
                 stats.shots++;
@@ -2045,7 +2090,10 @@ namespace game {
                 *blood_p = 0;
             }
 
-            if(playerHealth <= 0 && dieTimer == 0) dieTimer = 1;
+            if(playerHealth <= 0 && dieTimer == 0) {
+                dieTimer = 1;
+                DEBUG_LOG(F("R.I.P."));
+            }
         }
 
         void drawPlayer(::gfx::Frame* frame_p) {
@@ -2390,7 +2438,13 @@ namespace game {
             if(impTimer == 0) {
                 for(byte i = 0; i < imps.size(); i++) {
                     Imp* ent = imps[i];
-                    if(ent->posX > 0) shots.push(Shot(ent->posX - 1, ent->posY, false, false));
+                    if(ent->posX > 0) {
+                        if(!shots.tryPush(Shot(ent->posX - 1, ent->posY, false, false))) {
+#if CONF_DEBUG_LOG_PUSH_FAILURES
+                            DEBUG_LOG(F("tryPush Shot failed (Imp)"));
+#endif
+                        }
+                    }
                 }
             }
         }
@@ -2409,7 +2463,7 @@ Buttons lastHeldButtons;
 void setup() {
     Serial.begin(9600);
     lcd.begin(LCD_WIDTH, LCD_HEIGHT);
-    DEBUG_LOG("LCD began");
+    DEBUG_LOG(F("LCD began"));
 
     pinMode(PIN_BUTTON_UP, INPUT_PULLUP);
     pinMode(PIN_BUTTON_DOWN, INPUT_PULLUP);
@@ -2422,13 +2476,13 @@ void setup() {
     pinMode(PIN_LCD_DB5, OUTPUT);
     pinMode(PIN_LCD_DB6, OUTPUT);
     pinMode(PIN_LCD_DB7, OUTPUT);
-    DEBUG_LOG("Pin modes set");
+    DEBUG_LOG(F("Pin modes set"));
 
-    DEBUG_LOG_CAPTIONED("Frame length: ", MILLIS_PER_FRAME);
+    DEBUG_LOG_CAPTIONED(F("Frame length: "), MILLIS_PER_FRAME);
     nextFrameDue = millis() + MILLIS_PER_FRAME;
 
     scene = new game::Game(149);
-    if(scene == NULL) panic(PANIC_ALLOCATION_FAILED, "Scene");
+    if(scene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Game"));
     //scene = new gfx::CharViewer();
     scene->resume(&lcd);
 }
@@ -2475,12 +2529,12 @@ void loop() {
         delay(slack);
         digitalWrite(LED_BUILTIN, LOW);
 
-        DEBUG_LOG_CAPTIONED("Slack: ", slack);
+        DEBUG_LOG_CAPTIONED(F("Slack: "), slack);
     } else {
-        DEBUG_LOG_CAPTIONED("Lag: ", now - nextFrameDue);
+        DEBUG_LOG_CAPTIONED(F("Lag: "), now - nextFrameDue);
 
 #if CONF_PANIC_LAG
-        panic(PANIC_LAG, "We are lagging :(");
+        panic(PANIC_LAG, F("We are lagging :("));
 #endif
     }
     nextFrameDue += MILLIS_PER_FRAME;

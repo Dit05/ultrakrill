@@ -7,3 +7,4 @@ profiles:
       - LiquidCrystal (1.0.7)
 
 default_profile: uno
+default_port: /dev/ttyACM0
