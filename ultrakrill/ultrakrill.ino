@@ -49,6 +49,14 @@ const unsigned long MILLIS_PER_FRAME = 1000ul / FRAMERATE;
 unsigned long nextFrameDue;
 bool lagging = false; // Időtúllépéses-e az előző frame.
 
+
+// Scenek
+void switchToMainMenu(); // Ezt forward declarelni kell, mert különben a scenek nem tudnak egymásra körbehivatkozni.
+class Scene;
+Scene* scene = NULL;
+Scene* nextScene = NULL;
+
+
 // Debug
 #if CONF_DEBUG_LOGGING == 1
 
@@ -153,6 +161,7 @@ public:
         if(size_m >= CAP) return false;
         ((T*)buffer)[size_m] = elem;
         size_m++;
+        return true;
     }
 
     void push(T elem) {
@@ -476,11 +485,15 @@ namespace gfx {
 
         Fire() {
             ::Random rand(millis() + 149);
-            fillMask(&rand, mask1);
-            fillMask(&rand, mask2);
+            randomizeMasks(&rand);
         }
 
         Fire(::Random* rand_p) {
+            randomizeMasks(rand_p);
+        }
+
+
+        void randomizeMasks(::Random* rand_p) {
             fillMask(rand_p, mask1);
             fillMask(rand_p, mask2);
         }
@@ -552,9 +565,13 @@ namespace gfx {
         void flip(byte* sprite) {
             for(byte i = 0; i < CHAR_HEIGHT; i++) {
                 byte row = sprite[i];
+                byte flipped = 0;
                 for(byte j = 0; j < CHAR_WIDTH; j++) {
-                    // TODO
+                    byte right = (row >> j) & 1;
+                    byte left = (row >> (CHAR_WIDTH - 1 - j)) & 1;
+                    flipped |= (left << j) | (right << (CHAR_WIDTH - 1 - j));
                 }
+                sprite[i] = flipped;
             }
         }
 
@@ -723,7 +740,7 @@ namespace gfx {
             0b00001,
             0b00001,
             0b00001,
-            0b00000
+            0b00001
         };
 
         const byte CROSSBONE_BOTTOM[CHAR_HEIGHT] = {
@@ -743,10 +760,10 @@ namespace gfx {
             0b01111,
             0b11111,
             0b11111,
-            0b11111,
+            0b10011,
             0b10001,
             0b10001,
-            0b11001
+            0b11111
         };
 
         const byte SKULL1_BOTTOM[CHAR_HEIGHT] = {
@@ -765,10 +782,10 @@ namespace gfx {
             0b00000,
             0b00000,
             0b01111,
+            0b10011,
+            0b10001,
+            0b10001,
             0b11111,
-            0b11001,
-            0b10001,
-            0b10001,
             0b11111
         };
 
@@ -1422,17 +1439,49 @@ namespace game {
 
         void process(Scene** changeScene) {
             animationTimer++;
+            animationTimer %= ANIMATION_PERIOD;
+
+            if(buttonsReleased.right) {
+                switchToMainMenu();
+            }
         }
 
         void draw(::LiquidCrystal* lcd_p) {
+            setChars(lcd_p);
+
             gfx::Frame frame {};
+            frame.clear(' ');
+
+            byte mid = LCD_WIDTH / 2 - 1;
+            *frame.index(mid - 1, 0) = CHAR_CROSSBONE_TL;
+            *frame.index(mid + 2, 0) = CHAR_CROSSBONE_TR;
+            *frame.index(mid - 1, 1) = CHAR_CROSSBONE_BL;
+            *frame.index(mid + 2, 1) = CHAR_CROSSBONE_BR;
+
+            *frame.index(mid - 0, 0) = CHAR_SKULL_TL;
+            *frame.index(mid + 1, 0) = CHAR_SKULL_TR;
+            *frame.index(mid - 0, 1) = CHAR_SKULL_BL;
+            *frame.index(mid + 1, 1) = CHAR_SKULL_BR;
+
+            frame.write(mid - 6, 0, "Game");
+            frame.write(mid + 4, 0, "over");
+
+            byte haX;
+            if(animationTimer % (ANIMATION_INTERVAL * 2) >= ANIMATION_INTERVAL) {
+                if(animationTimer < ANIMATION_INTERVAL * 2) {
+                    haX = mid - 5;
+                } else {
+                    haX = mid + 5;
+                }
+                frame.write(haX, 1, "HA");
+            }
 
             frame.present(lcd_p);
         }
 
         void suspend() { /* do nothing */ }
 
-        void resume(::LiquidCrystal* lcd_p) {};
+        void resume(::LiquidCrystal* lcd_p) { /* do nothing */ };
 
     private:
         const Stats stats;
@@ -1451,10 +1500,48 @@ namespace game {
         const static byte CHAR_SKULL_BR = 7;
 
         const static byte ANIMATION_INTERVAL = 20;
-        const static byte ANIMATION_PERIOD = 2 * ANIMATION_INTERVAL;
+        const static byte ANIMATION_PERIOD = 4 * ANIMATION_INTERVAL;
 
         void setChars(::LiquidCrystal* lcd_p) {
-            lcd_p->createChar(CHAR_CROSSBONE_TR, (byte*)::gfx::sprites::CROSSBONE_TOP);
+            byte flipped[8];
+
+            // Csont
+            lcd_p->createChar(CHAR_CROSSBONE_TL, (byte*)::gfx::sprites::CROSSBONE_TOP);
+
+            memcpy(flipped, ::gfx::sprites::CROSSBONE_TOP, sizeof(flipped));
+            ::gfx::sprites::flip(flipped);
+
+            lcd_p->createChar(CHAR_CROSSBONE_TR, flipped);
+
+            lcd_p->createChar(CHAR_CROSSBONE_BL, (byte*)::gfx::sprites::CROSSBONE_BOTTOM);
+
+            memcpy(flipped, ::gfx::sprites::CROSSBONE_BOTTOM, sizeof(flipped));
+            ::gfx::sprites::flip(flipped);
+            lcd_p->createChar(CHAR_CROSSBONE_BR, flipped);
+
+            // 💀
+            const byte* top;
+            const byte* bottom;
+            if(animationTimer % (ANIMATION_INTERVAL * 2) < ANIMATION_INTERVAL) {
+                top = ::gfx::sprites::SKULL1_TOP;
+                bottom = ::gfx::sprites::SKULL1_BOTTOM;
+            } else {
+                top = ::gfx::sprites::SKULL2_TOP;
+                bottom = ::gfx::sprites::SKULL2_BOTTOM;
+            }
+
+            lcd_p->createChar(CHAR_SKULL_TL, (byte*)top);
+
+            memcpy(flipped, top, sizeof(flipped));
+            ::gfx::sprites::flip(flipped);
+
+            lcd_p->createChar(CHAR_SKULL_TR, flipped);
+
+            lcd_p->createChar(CHAR_SKULL_BL, (byte*)bottom);
+
+            memcpy(flipped, bottom, sizeof(flipped));
+            ::gfx::sprites::flip(flipped);
+            lcd_p->createChar(CHAR_SKULL_BR, flipped);
         }
 
     };
@@ -1678,6 +1765,7 @@ namespace game {
         static const byte SHOOT_CHARGE_STEP_LENGTH = 4;
         bool playerUp = false;
         byte playerIFrames = 0;
+        byte leapTime = 0;
 
         static const byte MAX_HEALTH = CHAR_WIDTH * CHAR_HEIGHT;
         byte playerHealth = MAX_HEALTH;
@@ -1757,7 +1845,8 @@ namespace game {
                 byte bitsLeft = playerHealth;
                 for(byte y = 0; y < CHAR_HEIGHT && bitsLeft > 0; y++) {
                     for(byte x = 0; x < CHAR_WIDTH && bitsLeft > 0; x++) {
-                        juice[y] |= 1 << (CHAR_WIDTH - x - 1);
+                        byte shift = (x + frameNumber) % CHAR_WIDTH;
+                        juice[CHAR_HEIGHT - 1 - y] |= 1 << (CHAR_WIDTH - shift - 1);
                         bitsLeft--;
                     }
                 }
@@ -1869,7 +1958,7 @@ namespace game {
 
             dealShotDamages();
 
-            if(buttonsHeld.down && !buttonsHeld.up) stepAllway(); // Genuis! (enemies aren't updated)
+            if(leapTime > 0) stepAllway(); // Genuis! (enemies aren't updated)
 
             // Vércsökkentés
             bloodDrainTimer++;
@@ -2027,15 +2116,21 @@ namespace game {
             // Ugrálás
             if(playerUp) {
                 playerUp = buttonsHeld.up || (*obstacleMap.index(playerX(), 1) != OBSTACLE_EMPTY);
-                // HACK
-                hitPlayer(255);
             } else {
                 playerUp = buttonsHeld.up && (*obstacleMap.index(playerX(), 0) == OBSTACLE_EMPTY);
             }
 
-            if(buttonsHeld.up) playerFrame = 0;
-            else if(buttonsHeld.down) playerFrame = 2;
-            else playerFrame = (stepTimer >= layer_p->framesPerStep() / 2) ? 1 : 0;
+            if(buttonsHeld.up) {
+                playerFrame = 0;
+                //hitPlayer(255);
+            } else if(buttonsHeld.down) {
+                playerFrame = 2;
+                leapTime = 2;
+            } else {
+                playerFrame = (stepTimer >= layer_p->framesPerStep() / 2) ? 1 : 0;
+            }
+
+            if(!buttonsHeld.up && !buttonsHeld.down && leapTime > 0) leapTime--;
 
 
             // Parryzás
@@ -2450,14 +2545,84 @@ namespace game {
         }
     };
 
+
+    uint16_t globalSeed = 0;
+
+    void startGame() {
+        if(nextScene != NULL) delete nextScene;
+        nextScene = new game::Game(globalSeed);
+        if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Game"));
+    }
+
 }
 
+class MenuScene : public Scene {
+
+public:
+
+    MenuScene() {
+        Random rand { 1 };
+        for(byte i = 0; i < FIRE_COUNT; i++) {
+            fires[i].randomizeMasks(&rand);
+        }
+    }
+
+    void setInputs(Buttons held, Buttons pressed, Buttons released) {
+        buttonsHeld = held;
+        buttonsPressed = pressed;
+        buttonsReleased = released;
+    }
+
+    virtual void process(Scene** changeScene) {
+        if(buttonsReleased.right) {
+            game::startGame();
+        }
+
+        for(byte i = 0; i < FIRE_COUNT; i++) {
+            fires[i].advancePhase();
+        }
+    }
+
+    virtual void draw(::LiquidCrystal* lcd_p) {
+        gfx::Frame frame {};
+        frame.clear(' ');
 
 
+        byte composedFire[CHAR_HEIGHT];
+        for(byte i = 0; i < FIRE_COUNT; i++) {
+            fires[i].compose(composedFire);
+            lcd_p->createChar(i, composedFire);
+        }
 
-Scene* scene;
-Scene* nextScene = NULL;
-Buttons lastHeldButtons;
+        for(byte i = 0; i < LCD_WIDTH; i++) {
+            *frame.index(i, LCD_HEIGHT - 1) = i % FIRE_COUNT;
+        }
+
+
+        frame.write(3, 0, text::TITLE);
+
+
+        frame.present(lcd_p);
+    }
+
+    virtual void suspend() {};
+    virtual void resume(::LiquidCrystal* lcd_p) {};
+
+private:
+    Buttons buttonsHeld = {};
+    Buttons buttonsPressed = {};
+    Buttons buttonsReleased = {};
+    const static byte FIRE_COUNT = 4;
+    gfx::Fire fires[FIRE_COUNT];
+};
+
+
+void switchToMainMenu() {
+    if(nextScene != NULL) delete nextScene;
+    nextScene = new MenuScene();
+    if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Menu"));
+}
+
 
 
 void setup() {
@@ -2481,42 +2646,48 @@ void setup() {
     DEBUG_LOG_CAPTIONED(F("Frame length: "), MILLIS_PER_FRAME);
     nextFrameDue = millis() + MILLIS_PER_FRAME;
 
-    scene = new game::Game(149);
-    if(scene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Game"));
-    //scene = new gfx::CharViewer();
-    scene->resume(&lcd);
+    switchToMainMenu();
 }
 
+
+Buttons lastHeldButtons;
+
 void loop() {
+    game::globalSeed++;
+
     // Jelenetváltás
     if(nextScene != NULL) {
-        scene->suspend();
+        if(scene != NULL) scene->suspend();
         delete scene;
         scene = nextScene;
         nextScene = NULL;
+        lcd.clear();
         scene->resume(&lcd);
     }
 
-    // Bemenet
-    Buttons heldNow {
-        .up = (digitalRead(PIN_BUTTON_UP) == LOW),
-        .down = (digitalRead(PIN_BUTTON_DOWN) == LOW),
-        .right = (digitalRead(PIN_BUTTON_RIGHT) == LOW)
-    };
 
-    scene->setInputs(heldNow, !lastHeldButtons && heldNow, lastHeldButtons && !heldNow);
+    if(scene != NULL) {
+        // Bemenet
+        Buttons heldNow {
+            .up = (digitalRead(PIN_BUTTON_UP) == LOW),
+            .down = (digitalRead(PIN_BUTTON_DOWN) == LOW),
+            .right = (digitalRead(PIN_BUTTON_RIGHT) == LOW)
+        };
 
-    lastHeldButtons = heldNow;
+        scene->setInputs(heldNow, !lastHeldButtons && heldNow, lastHeldButtons && !heldNow);
+
+        lastHeldButtons = heldNow;
 
 
-    scene->process(&nextScene);
-    // Ha időhiányban szenvedünk, akkor átugorjuk a kirajzolást, mert ez jelentős időbe telik, és "nem hat" a játékmenetre.
-    if(!lagging) {
-        scene->draw(&lcd);
-#ifdef LCD_EMULATOR
-        lcd.redraw();
-#endif
+        scene->process(&nextScene);
+        // Ha időhiányban szenvedünk, akkor átugorjuk a kirajzolást, mert ez jelentős időbe telik, és "nem hat" a játékmenetre.
+        if(!lagging) {
+            scene->draw(&lcd);
+        }
     }
+#ifdef LCD_EMULATOR
+    lcd.redraw();
+#endif
 
 
     // Kitaláljuk, mennyit kell várni a következő frame elejéig
