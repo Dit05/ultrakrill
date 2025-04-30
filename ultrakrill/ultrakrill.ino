@@ -837,6 +837,13 @@ namespace gfx {
             while(x < LCD_WIDTH && *text != '\0') *index(x++, y) = *text++;
         }
 
+        void writeRtl(byte x, byte y, unsigned long num) {
+            do {
+                *index(x--, y) = "0123456789"[num % 10];
+                num /= 10;
+            } while(x > 0 && num != 0);
+        }
+
         void clear(char ch) {
             for(unsigned int i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) buffer[i] = ch;
         }
@@ -1443,6 +1450,14 @@ namespace game {
 
             if(buttonsReleased.right) {
                 switchToMainMenu();
+                return;
+            }
+
+            if(buttonsReleased.down && scroll < MAX_SCROLL) {
+                scroll++;
+            }
+            if(buttonsReleased.up && scroll > 0) {
+                scroll--;
             }
         }
 
@@ -1452,28 +1467,8 @@ namespace game {
             gfx::Frame frame {};
             frame.clear(' ');
 
-            byte mid = LCD_WIDTH / 2 - 1;
-            *frame.index(mid - 1, 0) = CHAR_CROSSBONE_TL;
-            *frame.index(mid + 2, 0) = CHAR_CROSSBONE_TR;
-            *frame.index(mid - 1, 1) = CHAR_CROSSBONE_BL;
-            *frame.index(mid + 2, 1) = CHAR_CROSSBONE_BR;
-
-            *frame.index(mid - 0, 0) = CHAR_SKULL_TL;
-            *frame.index(mid + 1, 0) = CHAR_SKULL_TR;
-            *frame.index(mid - 0, 1) = CHAR_SKULL_BL;
-            *frame.index(mid + 1, 1) = CHAR_SKULL_BR;
-
-            frame.write(mid - 6, 0, "Game");
-            frame.write(mid + 4, 0, "over");
-
-            byte haX;
-            if(animationTimer % (ANIMATION_INTERVAL * 2) >= ANIMATION_INTERVAL) {
-                if(animationTimer < ANIMATION_INTERVAL * 2) {
-                    haX = mid - 5;
-                } else {
-                    haX = mid + 5;
-                }
-                frame.write(haX, 1, "HA");
+            for(byte y = 0; y < LCD_HEIGHT; y++) {
+                drawRow(&frame, y, scroll + y);
             }
 
             frame.present(lcd_p);
@@ -1489,6 +1484,9 @@ namespace game {
         Buttons buttonsPressed = {};
         Buttons buttonsReleased = {};
         byte animationTimer = 0;
+
+        const byte MAX_SCROLL = 2 + 5 - LCD_HEIGHT; // 2 skull rows, 5 stats
+        byte scroll = 0;
 
         const static byte CHAR_CROSSBONE_TL = 0;
         const static byte CHAR_CROSSBONE_TR = 1;
@@ -1542,6 +1540,64 @@ namespace game {
             memcpy(flipped, bottom, sizeof(flipped));
             ::gfx::sprites::flip(flipped);
             lcd_p->createChar(CHAR_SKULL_BR, flipped);
+        }
+
+        void drawRow(::gfx::Frame* frame_p, byte y, byte row) {
+            byte mid = LCD_WIDTH / 2 - 1;
+
+            // Legrosszabb megoldás ever! (pusztító switch)
+            switch(row) {
+                case 0:
+                    *frame_p->index(mid - 1, y) = CHAR_CROSSBONE_TL;
+                    *frame_p->index(mid + 2, y) = CHAR_CROSSBONE_TR;
+                    *frame_p->index(mid - 0, y) = CHAR_SKULL_TL;
+                    *frame_p->index(mid + 1, y) = CHAR_SKULL_TR;
+
+                    frame_p->write(mid - 6, y, "Game");
+                    frame_p->write(mid + 4, y, "over");
+                    break;
+
+                case 1:
+                    *frame_p->index(mid - 1, y) = CHAR_CROSSBONE_BL;
+                    *frame_p->index(mid + 2, y) = CHAR_CROSSBONE_BR;
+
+                    *frame_p->index(mid - 0, y) = CHAR_SKULL_BL;
+                    *frame_p->index(mid + 1, y) = CHAR_SKULL_BR;
+
+                    byte haX;
+                    if(animationTimer % (ANIMATION_INTERVAL * 2) >= ANIMATION_INTERVAL) {
+                        if(animationTimer < ANIMATION_INTERVAL * 2) {
+                            haX = mid - 5;
+                        } else {
+                            haX = mid + 5;
+                        }
+                        frame_p->write(haX, y, "HA");
+                    }
+                    break;
+
+                case 2:
+                    frame_p->write(0, y, "steps");
+                    frame_p->writeRtl(LCD_WIDTH - 1, y, stats.steps);
+                    break;
+                case 3:
+                    frame_p->write(0, y, "shots");
+                    frame_p->writeRtl(LCD_WIDTH - 1, y, stats.shots);
+                    break;
+                case 4:
+                    frame_p->write(0, y, "parries");
+                    frame_p->writeRtl(LCD_WIDTH - 1, y, stats.parries);
+                    break;
+                case 5:
+                    frame_p->write(0, y, "damage");
+                    frame_p->writeRtl(LCD_WIDTH - 1, y, stats.damageTaken);
+                    break;
+                case 6:
+                    frame_p->write(0, y, "healing");
+                    frame_p->writeRtl(LCD_WIDTH - 1, y, stats.healingTaken);
+                    break;
+
+
+            }
         }
 
     };
@@ -1603,6 +1659,13 @@ namespace game {
                         if(*blood > 0) {
                             byte loss = max(1, *blood / 8);
                             *blood -= loss;
+                        }
+
+                        if(y + 1 < bloodMap.HEIGHT && (*obstacleMap.index(x, y + 1) == OBSTACLE_EMPTY || *obstacleMap.index(x, y + 1) == OBSTACLE_FIRE)) {
+                            byte* under = bloodMap.index(x, y + 1);
+                            byte transferable = min(byte(255 - *under), *blood);
+                            *blood -= transferable;
+                            *under += transferable;
                         }
                     }
                 }
@@ -2461,12 +2524,13 @@ namespace game {
 
             updateBlockmap();
             BlockmapFlags bm = getBlockmap(playerX(), playerY());
-            ObstacleKind obst = (ObstacleKind)*obstacleMap.index(playerX(), playerY());
+            ObstacleKind* obst_p = (ObstacleKind*)obstacleMap.index(playerX(), playerY());
             if((bm & BLOCKMAP_ENEMY) > 0) {
                 hitPlayer(DAMAGE_MELEE);
-            } else if(obst == OBSTACLE_WALL || obst == OBSTACLE_CRACKED_WALL) {
+            } else if(*obst_p == OBSTACLE_WALL || *obst_p == OBSTACLE_CRACKED_WALL) {
                 hitPlayer(DAMAGE_WALL, false);
-            } else if(obst == OBSTACLE_FIRE) {
+                *obst_p = OBSTACLE_EMPTY;
+            } else if(*obst_p == OBSTACLE_FIRE) {
                 hitPlayer(DAMAGE_FIRE, false);
             }
 
