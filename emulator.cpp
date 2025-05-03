@@ -193,6 +193,9 @@ struct HardwareSerial {
     static void print(const char* text) {
         std::cout << text;
     }
+    static void println() {
+        // do nothing
+    }
     static void println(const char* text) {
         std::cout << text;
         std::cout << '\n';

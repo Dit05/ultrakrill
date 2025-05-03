@@ -16,6 +16,7 @@
 
 // Konfigurációs DEFINEok
 #define CONF_DEBUG_LOGGING 1
+#define CONF_DEBUG_ALWAYS_LOG_TIME 0
 #define CONF_DEBUG_LOG_PUSH_FAILURES 1
 
 #define CONF_PANIC_BOUNDS 1
@@ -435,16 +436,23 @@ public:
     virtual void draw(::LiquidCrystal* lcd_p) = 0;
     virtual void suspend() = 0;
     virtual void resume(::LiquidCrystal* lcd_p) = 0;
+    virtual ~Scene() {}
 
 };
 
 
 namespace text {
-    const char* TITLE = "ULTRAKRILL";
-
-    const char* MOTTO1 = "MANKIND IS DEAD.";
-    const char* MOTTO2 = "BLOOD IS FUEL.";
-    const char* MOTTO3 = "HELL IS FULL.";
+    const char* INTRO[] {
+        "MACHINE ID:",
+        " V1",
+        "STATUS:",
+        "APPROACHING HELL",
+        "",
+        "MANKIND IS DEAD.",
+        "BLOOD IS FUEL.",
+        "HELL IS FULL."
+    };
+    const byte INTRO_LENGTH = sizeof(INTRO) / sizeof(const char*);
 }
 
 
@@ -851,6 +859,19 @@ namespace gfx {
         void clear() { clear(' '); }
 
 
+        void scrollUp() {
+            for(byte y = 0; y < LCD_HEIGHT - 1; y++) {
+                for(byte x = 0; x < LCD_WIDTH; x++) {
+                    *index(x, y) = *index(x, y + 1);
+                }
+            }
+
+            for(byte x = 0; x < LCD_WIDTH; x++) {
+                *index(x, LCD_HEIGHT - 1) = ' ';
+            }
+        }
+
+
         // Kirajzolja ezt a framet az egész LCD tartalmának felülírásával.
         void present(::LiquidCrystal* lcd_p) {
             for(byte y = 0; y < LCD_HEIGHT; y++) {
@@ -946,14 +967,26 @@ namespace game {
     };
 
     struct Shot : public Entity {
-        bool friendly;
-        bool explosive;
+        byte flags;
 
         Shot(byte posX, byte posY, bool friendly, bool explosive) {
             this->posX = posX;
             this->posY = posY;
-            this->friendly = friendly;
-            this->explosive = explosive;
+            flags = 0;
+            if(friendly) flags |= 1;
+            if(explosive) flags |= 2;
+        }
+
+
+        bool friendly() { return (flags & 1) > 0; }
+        bool explosive() { return (flags & 2) > 0; }
+        void setFriendly(bool val) {
+            if(val) flags |= 1;
+            else flags &= ~1;
+        }
+        void setExplosive(bool val) {
+            if(val) flags |= 2;
+            else flags &= ~2;
         }
     };
 
@@ -1427,6 +1460,20 @@ namespace game {
         unsigned int parries = 0;
         unsigned int damageTaken = 0;
         unsigned int healingTaken = 0;
+
+        void printJson() {
+            Serial.print(F("{\"steps\":"));
+            Serial.print(steps);
+            Serial.print(F(",\"shots\":"));
+            Serial.print(shots);
+            Serial.print(F(",\"parries\":"));
+            Serial.print(parries);
+            Serial.print(F(",\"damageTaken\":"));
+            Serial.print(damageTaken);
+            Serial.print(F(",\"healingTaken\":"));
+            Serial.print(healingTaken);
+            Serial.print(F("}"));
+        }
     };
 
 
@@ -1631,6 +1678,9 @@ namespace game {
             if(dieTimer > 0) {
                 dieTimer++;
                 if(dieTimer > 30) {
+                    Serial.print("[Stats] ");
+                    stats.printJson();
+                    Serial.println();
                     *changeScene = new ::game::SkullScene(stats);
                     if(*changeScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("SkullScene"));
                 }
@@ -1842,12 +1892,12 @@ namespace game {
 
 
         BlockmapFlags blockmap[LCD_WIDTH * LCD_HEIGHT];
-        Vec<Shot, 48> shots {};
+        Vec<Shot, 24> shots {};
         Scroller obstacleMap {};
         Scroller smokeMap {};
         Scroller bloodMap {};
-        Vec<Filth, 32> filths {};
-        Vec<Imp, 32> imps {};
+        Vec<Filth, 16> filths {};
+        Vec<Imp, 16> imps {};
         byte impTimer = 0;
 
 
@@ -1919,13 +1969,13 @@ namespace game {
 
 
         void switchLayer(byte num) {
-            DEBUG_LOG_CAPTIONED(F("Layer "), num);
+            //DEBUG_LOG_CAPTIONED(F("Layer "), num + 1);
             layerNumber = num;
             layer_p = &LAYERS[num];
             layerStepsLeft = layer_p->length();
 
             String msg(F("LAYER "));
-            msg += num;
+            msg += num + 1;
             msg += ": ";
             msg += layer_p->name();
             showBanner(msg);
@@ -2106,9 +2156,10 @@ namespace game {
                     x++;
                 }
 
-                bannerScroll++;
+                //if((frameNumber % 2) == 0) bannerScroll++;
                 if(bannerScroll >= banner.length() + LCD_WIDTH) {
                     banner = String {};
+                    bannerScroll = 0;
                 }
             }
 
@@ -2202,11 +2253,11 @@ namespace game {
                 if(parryCooldown == 0) {
                     for(byte i = 0; i < shots.size(); i++) {
                         Shot* ent = shots[i];
-                        if(!ent->friendly && ent->posY == playerY() && ent->posX <= 1) {
+                        if(!ent->friendly() && ent->posY == playerY() && ent->posX <= 1) {
                             parryFlash = PARRY_FLASH_LENGTH;
-                            ent->friendly = true;
+                            ent->setFriendly(true);
                             ent->posX = 1;
-                            ent->explosive = true;
+                            ent->setExplosive(true);
 
                             if(!parried) {
                                 playerIFrames = max(playerIFrames, (byte)5);
@@ -2271,8 +2322,8 @@ namespace game {
                 Shot* ent = shots[i];
 
                 char sprite;
-                if(ent->explosive) sprite = '*';
-                else sprite = ent->friendly ? '-' : '+';
+                if(ent->explosive()) sprite = '*';
+                else sprite = ent->friendly() ? '-' : '+';
 
                 *frame_p->index(ent->posX, ent->posY) = sprite;
             }
@@ -2284,7 +2335,7 @@ namespace game {
                 i--;
                 Shot* ent = shots[i];
 
-                if(ent->friendly) {
+                if(ent->friendly()) {
                     if(ent->posX >= LCD_WIDTH - 1) {
                         shots.removeAt(i);
                         continue;
@@ -2312,7 +2363,7 @@ namespace game {
                 Shot* ent = shots[i];
 
                 bool impacted = false;
-                if(ent->explosive) {
+                if(ent->explosive()) {
                     // Direkt nem sebzünk, mert a robbanás violentebb és több vért csinál.
                     if(
                         (obstacleMap.indexValid(ent->posX, ent->posY)
@@ -2325,7 +2376,7 @@ namespace game {
                     }
                 } else {
                     impacted = hitObstacleAt(ent->posX, ent->posY)
-                        || (ent->friendly && hitEnemyAt(ent->posX, ent->posY, 1));
+                        || (ent->friendly() && hitEnemyAt(ent->posX, ent->posY, 1));
                 }
 
                 if(impacted) {
@@ -2486,8 +2537,6 @@ namespace game {
         void drawSmoke(::gfx::Frame* frame_p) {
             for(byte y = 0; y < LCD_HEIGHT; y++) {
                 for(byte x = 0; x < LCD_WIDTH; x++) {
-                    char ch;
-
                     byte smoke = *smokeMap.index(x, y);
                     if(smoke > 0) {
                         *frame_p->index(x, y) = ::gfx::SMOKE[min(smoke, ::gfx::SMOKE_MAX)];;
@@ -2620,6 +2669,103 @@ namespace game {
 
 }
 
+class IntroScene : public Scene {
+public:
+    IntroScene() {
+        frame.clear(' ');
+    }
+
+    void setInputs(Buttons held, Buttons pressed, Buttons released) {
+        buttonsHeld = held;
+        buttonsPressed = pressed;
+        buttonsReleased = released;
+    }
+
+    void process(Scene** changeScene) {
+        if(buttonsHeld.down) {
+            timer = 0;
+            pause = 0;
+        }
+        if(buttonsReleased.right) {
+            game::startGame();
+            return;
+        }
+
+        if(pause > 0) {
+            *frame.index(cursorX, cursorY) = (pause % 10) < 5 ? '_' : ' ';
+            pause--;
+            return;
+        }
+
+        if(lineNumber > text::INTRO_LENGTH) {
+            game::startGame();
+            return;
+        }
+
+        if(timer <= 0) {
+            bool lineEnded;
+            if(*text != '\0') lineEnded = write(*text++);
+
+            if(*text == '\0') {
+                text = ::text::INTRO[lineNumber++];
+
+                pause = 20;
+                if(!lineEnded) crlf();
+                return;
+            }
+
+            timer = 2;
+        } else {
+            timer--;
+        }
+    }
+
+    void draw(::LiquidCrystal* lcd_p) {
+        frame.present(lcd_p);
+    }
+
+    void suspend() {}
+    void resume(::LiquidCrystal* lcd_p) {}
+
+private:
+    Buttons buttonsHeld = {};
+    Buttons buttonsPressed = {};
+    Buttons buttonsReleased = {};
+    gfx::Frame frame {};
+
+    const char* text = "\0";
+
+    byte lineNumber = 0;
+
+    byte timer = 0;
+    byte cursorX = 0;
+    byte cursorY = 0;
+    byte pause = 0; // Hatásszünet Változó
+
+    bool write(char ch) {
+        *frame.index(cursorX, cursorY) = ch;
+        cursorX++;
+
+        bool lineEnded = cursorX >= LCD_WIDTH;
+        if(lineEnded) crlf();
+
+        *frame.index(cursorX, cursorY) = '_';
+
+        return lineEnded;
+    }
+
+    void crlf() {
+        if(cursorX < LCD_WIDTH) *frame.index(cursorX, cursorY) = ' ';
+
+        cursorX = 0;
+        cursorY++;
+        while(cursorY >= LCD_HEIGHT) {
+            frame.scrollUp();
+            cursorY--;
+        }
+    }
+};
+
 class MenuScene : public Scene {
 
 public:
@@ -2639,7 +2785,10 @@ public:
 
     virtual void process(Scene** changeScene) {
         if(buttonsReleased.right) {
-            game::startGame();
+            //game::startGame();
+            if(nextScene != NULL) delete nextScene;
+            nextScene = new IntroScene();
+            if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Intro"));
         }
 
         for(byte i = 0; i < FIRE_COUNT; i++) {
@@ -2663,7 +2812,7 @@ public:
         }
 
 
-        frame.write(3, 0, text::TITLE);
+        frame.write(3, 0, "ULTRAKRILL");
 
 
         frame.present(lcd_p);
@@ -2715,6 +2864,7 @@ void setup() {
 
 
 Buttons lastHeldButtons;
+unsigned long worstSlack = 99999999;
 
 void loop() {
     game::globalSeed++;
@@ -2764,7 +2914,14 @@ void loop() {
         delay(slack);
         digitalWrite(LED_BUILTIN, LOW);
 
-        DEBUG_LOG_CAPTIONED(F("Slack: "), slack);
+        if(slack < worstSlack
+#if CONF_DEBUG_ALWAYS_LOG_TIME
+            || true
+#endif
+        ) {
+            DEBUG_LOG_CAPTIONED(F("Slack: "), slack);
+            worstSlack = slack;
+        }
     } else {
         DEBUG_LOG_CAPTIONED(F("Lag: "), now - nextFrameDue);
 
