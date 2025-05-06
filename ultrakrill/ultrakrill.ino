@@ -18,6 +18,7 @@
 #define CONF_DEBUG_LOGGING 1
 #define CONF_DEBUG_ALWAYS_LOG_TIME 0
 #define CONF_DEBUG_LOG_PUSH_FAILURES 1
+#define CONF_DEBUG_LOG_ALLOCS 1
 
 #define CONF_PANIC_BOUNDS 1
 #define CONF_PANIC_LAG 0
@@ -84,6 +85,17 @@ DEBUG_PRINTLN(val);
 #define DEBUG_PRINTLN(val)
 #define DEBUG_LOG(val)
 #define DEBUG_LOG_CAPTIONED(text, val)
+
+#endif
+
+#if CONF_DEBUG_LOG_ALLOCS
+
+#define LOG_NEW(what) DEBUG_LOG_CAPTIONED(F("new "), (unsigned int)what)
+#define LOG_NEWS(what) DEBUG_LOG_CAPTIONED(F("operator new[] "), (unsigned int)what)
+#define LOG_DELETE(what) DEBUG_LOG_CAPTIONED(F("delete "), (unsigned int)what)
+#define LOG_DELETES(what) DEBUG_LOG_CAPTIONED(F("delete[] "), (unsigned int)what)
+
+#else //
 
 #endif
 
@@ -221,7 +233,11 @@ public:
     }
 
     ~List() {
-        if(ptr_m != NULL) delete[] ptr_m;
+        Serial.println("list destructor");
+        if(ptr_m != NULL) {
+            LOG_DELETES(ptr_m);
+            delete[] ptr_m;
+        }
     }
 
 
@@ -231,6 +247,7 @@ public:
         unsigned int size = newCapacity * sizeof(T);
         DEBUG_LOG_CAPTIONED(F("List realloc "), size);
         ptr_m = (T*)operator new[](size);
+        LOG_NEWS(ptr_m);
         if(ptr_m == NULL) {
             ptr_m = old_ptr;
             panic(PANIC_ALLOCATION_FAILED, F("List"));
@@ -239,6 +256,8 @@ public:
 
         memcpy(ptr_m, old_ptr, sizeof(T) * min(capacity_m, newCapacity));
         capacity_m = newCapacity;
+
+        LOG_DELETES(old_ptr);
         delete[] old_ptr;
     }
 
@@ -265,7 +284,7 @@ public:
     }
 
     T pop() {
-        if(size_m <= 0) panic(PANIC_COLLECTION_EMPTY, "");
+        if(size_m <= 0) panic(PANIC_COLLECTION_EMPTY);
         return ptr_m[--size_m];
     }
 
@@ -310,7 +329,8 @@ private:
 
 class FlashStringWrapper final : public StringWrapper {
 public:
-    FlashStringWrapper(__FlashStringHelper* str) : str_m((const char PROGMEM *)str) {}
+    FlashStringWrapper(const __FlashStringHelper* str) : str_m((const char PROGMEM *)str) {}
+    FlashStringWrapper(const char* PROGMEM str) : str_m(str) {}
 
     char operator[](unsigned int i) const {
         return pgm_read_byte(&str_m[i]);
@@ -499,7 +519,7 @@ namespace gfx {
     constexpr const byte CHAR_IMP = 6; // Animated character for the flying-shooting enemy.
     constexpr const byte CHAR_OVERLAY = 7; // Character for full-screen overlay.
 
-    const char* SHOOT_CHARGE_CHARS = " .,;|+*";
+    const char* const PROGMEM SHOOT_CHARGE_CHARS = " .,;|+*";
 
     const char* SMOKE = ",;x&@";
     const byte SMOKE_MAX = strlen(SMOKE) - 1;
@@ -871,6 +891,10 @@ namespace gfx {
             return &buffer[(y * LCD_WIDTH) + x]; // A klasszikus 2D tömb indexelős képlet.
         }
 
+        void write(byte x, byte y, const StringWrapper* text) {
+            unsigned int i = 0;
+            while(x < LCD_WIDTH && (*text)[i] != '\0') *index(x++, y) = (*text)[i++];
+        }
         void write(byte x, byte y, const char* text) {
             while(x < LCD_WIDTH && *text != '\0') *index(x++, y) = *text++;
         }
@@ -1684,7 +1708,7 @@ namespace game {
 
     public:
 
-        Game(uint16_t seed) : levelSeed(seed) {
+        Game(uint16_t seed) : levelSeed(seed), patterns(createDefaultPatterns()) {
             bufferB.clear();
 
             switchLayer(0);
@@ -1708,10 +1732,11 @@ namespace game {
             if(dieTimer > 0) {
                 dieTimer++;
                 if(dieTimer > 30) {
-                    Serial.print("[Stats] ");
+                    Serial.print(F("[Stats] "));
                     stats.printJson();
                     Serial.println();
                     *changeScene = new ::game::SkullScene(stats);
+                    LOG_NEW(*changeScene);
                     if(*changeScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("SkullScene"));
                 }
                 return;
@@ -1882,7 +1907,7 @@ namespace game {
         byte frameNumber = 0; // drawenként nő
 
 
-        const game::PatternArray patterns = game::createDefaultPatterns();
+        const game::PatternArray patterns;
         const uint16_t levelSeed;
         ::Random levelRandom { 0 };
         ::Random effectRandom { 1 };
@@ -2006,7 +2031,7 @@ namespace game {
 
             String msg(F("LAYER "));
             msg += num + 1;
-            msg += ": ";
+            msg += F(": ");
             msg += layer_p->name();
             showBanner(msg);
 
@@ -2692,8 +2717,12 @@ namespace game {
     uint16_t globalSeed = 0;
 
     void startGame() {
-        if(nextScene != NULL) delete nextScene;
+        if(nextScene != NULL) {
+            LOG_DELETE(nextScene);
+            delete nextScene;
+        }
         nextScene = new game::Game(globalSeed);
+        LOG_NEW(nextScene);
         if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Game"));
     }
 
@@ -2815,9 +2844,12 @@ public:
 
     virtual void process(Scene** changeScene) {
         if(buttonsReleased.right) {
-            //game::startGame();
-            if(nextScene != NULL) delete nextScene;
+            if(nextScene != NULL) {
+                LOG_DELETE(nextScene);
+                delete nextScene;
+            }
             nextScene = new IntroScene();
+            LOG_NEW(nextScene);
             if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Intro"));
         }
 
@@ -2842,7 +2874,8 @@ public:
         }
 
 
-        frame.write(3, 0, "ULTRAKRILL");
+        const FlashStringWrapper title = FlashStringWrapper(F("ULTRAKRILL"));
+        frame.write(3, 0, &title);
 
 
         frame.present(lcd_p);
@@ -2861,8 +2894,12 @@ private:
 
 
 void switchToMainMenu() {
-    if(nextScene != NULL) delete nextScene;
+    if(nextScene != NULL) {
+        LOG_DELETE(nextScene);
+        delete nextScene;
+    }
     nextScene = new MenuScene();
+    LOG_NEW(nextScene);
     if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Menu"));
 }
 
@@ -2901,8 +2938,11 @@ void loop() {
 
     // Jelenetváltás
     if(nextScene != NULL) {
-        if(scene != NULL) scene->suspend();
-        delete scene;
+        if(scene != NULL) {
+            scene->suspend();
+            LOG_DELETE(scene);
+            delete scene;
+        }
         scene = nextScene;
         nextScene = NULL;
         lcd.clear();
