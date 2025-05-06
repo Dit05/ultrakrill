@@ -291,6 +291,36 @@ private:
 };
 
 
+class StringWrapper {
+public:
+    virtual char operator[](unsigned int i) const = 0;
+};
+
+class CStringWrapper final : public StringWrapper {
+public:
+    CStringWrapper(const char* str) : str_m(str) {}
+
+    char operator[](unsigned int i) const {
+        return str_m[i];
+    }
+
+private:
+    const char* str_m;
+};
+
+class FlashStringWrapper final : public StringWrapper {
+public:
+    FlashStringWrapper(__FlashStringHelper* str) : str_m((const char PROGMEM *)str) {}
+
+    char operator[](unsigned int i) const {
+        return pgm_read_byte(&str_m[i]);
+    }
+
+private:
+    const char* str_m;
+};
+
+
 // https://en.wikipedia.org/wiki/Linear-feedback_shift_register nyomán.
 class Random {
 
@@ -2156,7 +2186,7 @@ namespace game {
                     x++;
                 }
 
-                //if((frameNumber % 2) == 0) bannerScroll++;
+                if((frameNumber % 2) == 0) bannerScroll++;
                 if(bannerScroll >= banner.length() + LCD_WIDTH) {
                     banner = String {};
                     bannerScroll = 0;
