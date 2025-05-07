@@ -1301,13 +1301,12 @@ namespace game {
     };
 
 
-    ::game::PatternArray createDefaultPatterns() {
+    void createDefaultPatterns(PatternArray* patterns) {
         // TODO több pattern?
         // Itt van minden, hogy a string literálok hátha nem szennyezik a RAM-ot statikus változóként.
-        PatternArray patterns;
-        patterns.resizeTiles(158);
-        patterns.resizeOffsets(33);
-        patterns.resizeMarks(9);
+        patterns->resizeTiles(158);
+        patterns->resizeOffsets(33);
+        patterns->resizeMarks(9);
 
         // W: tűz
         // X: teljes fal
@@ -1318,111 +1317,109 @@ namespace game {
         // I: imp
         // E: imp/filth (véletlen)
         // kisbetű: opcionális
-        patterns.add("     ",
+        patterns->add("     ",
                      "ZWWWZ");
 
-        patterns.add("y",
+        patterns->add("y",
                      "z");
-        patterns.add("z",
+        patterns->add("z",
                      "y");
-        patterns.add("y",
+        patterns->add("y",
                      "y");
 
-        patterns.add(" ",
+        patterns->add(" ",
                      "F");
 
-        patterns.add("I",
+        patterns->add("I",
                      " ");
 
-        patterns.mark(); // 0. (Limbo)
+        patterns->mark(); // 0. (Limbo)
 
-        patterns.add("I",
+        patterns->add("I",
                      " ");
-        patterns.add(" ",
+        patterns->add(" ",
                      "E");
 
-        patterns.add(" x ",
+        patterns->add(" x ",
                      "Eee");
 
-        patterns.add("E",
+        patterns->add("E",
                      "Z");
 
-        patterns.add("fff",
+        patterns->add("fff",
                      "zzz");
 
-        patterns.mark(); // 1. (Lust)
+        patterns->mark(); // 1. (Lust)
 
-        patterns.add("ZZZ",
+        patterns->add("ZZZ",
                      "ZZZ");
-        patterns.add("ff",
+        patterns->add("ff",
                      "ff");
 
-        patterns.mark(); // 2. (Gluttony)
+        patterns->mark(); // 2. (Gluttony)
 
-        patterns.add("      IY",
+        patterns->add("      IY",
                      "ZWWWZ   ");
-        patterns.add("I",
+        patterns->add("I",
                      "W");
 
-        patterns.mark(); // 3. (Greed)
+        patterns->mark(); // 3. (Greed)
 
-        patterns.add(" zez ",
+        patterns->add(" zez ",
                      "zZFZz");
-        patterns.add(" Z ",
+        patterns->add(" Z ",
                      "ZVZ");
-        patterns.add(" X ",
+        patterns->add(" X ",
                      "XXX");
 
-        patterns.mark(); // 4. (Wrath)
+        patterns->mark(); // 4. (Wrath)
 
-        patterns.add("   w   ",
+        patterns->add("   w   ",
                      "w  y  w");
-        patterns.add("w  y  w",
+        patterns->add("w  y  w",
                      "   w   ");
-        patterns.add("yzy",
+        patterns->add("yzy",
                      "www");
-        patterns.add(" e ",
+        patterns->add(" e ",
                      "WWW");
-        patterns.add("     ",
+        patterns->add("     ",
                      "XZVZX");
-        patterns.add("XZZZX",
+        patterns->add("XZZZX",
                      "     ");
-        patterns.add("     ZXXx",
+        patterns->add("     ZXXx",
                      "xXXZ     ");
-        patterns.add("xXXZ     ",
+        patterns->add("xXXZ     ",
                      "     ZXXx");
 
-        patterns.mark(); // 5. (Heresy)
+        patterns->mark(); // 5. (Heresy)
 
-        patterns.add("Z  f  Z",
+        patterns->add("Z  f  Z",
                      "ZWfffWZ");
-        patterns.add("  iZ",
+        patterns->add("  iZ",
                      "  iZ");
 
-        patterns.mark(); // 6. (Violence)
+        patterns->mark(); // 6. (Violence)
 
-        patterns.add(" fff ",
+        patterns->add(" fff ",
                      "fFEFf");
-        patterns.add("X",
+        patterns->add("X",
                      "X");
 
-        patterns.mark(); // 7. (Fraud)
+        patterns->mark(); // 7. (Fraud)
 
-        patterns.add("yyzZzyy",
+        patterns->add("yyzZzyy",
                      "Ww w wW");
-        patterns.add("yXXy",
+        patterns->add("yXXy",
                      "yXXy");
-        patterns.add("XeEe",
+        patterns->add("XeEe",
                      "XeEe");
 
-        patterns.mark(); // 8. (Treachery)
-        DEBUG_LOG_CAPTIONED(F("Pattern tiles: "), patterns.tilesSize());
-        DEBUG_LOG_CAPTIONED(F("Pattern offsets: "), patterns.offsetsSize());
-        DEBUG_LOG_CAPTIONED(F("Pattern marks: "), patterns.marksSize());
-
-
-        return patterns;
+        patterns->mark(); // 8. (Treachery)
+        DEBUG_LOG_CAPTIONED(F("Pattern tiles: "), patterns->tilesSize());
+        DEBUG_LOG_CAPTIONED(F("Pattern offsets: "), patterns->offsetsSize());
+        DEBUG_LOG_CAPTIONED(F("Pattern marks: "), patterns->marksSize());
     };
+    PatternArray defaultPatterns;
 
 
     class Layer {
@@ -1708,7 +1705,7 @@ namespace game {
 
     public:
 
-        Game(uint16_t seed) : levelSeed(seed), patterns(createDefaultPatterns()) {
+        Game(uint16_t seed) : patterns(&defaultPatterns), levelSeed(seed) {
             bufferB.clear();
 
             switchLayer(0);
@@ -1907,7 +1904,7 @@ namespace game {
         byte frameNumber = 0; // drawenként nő
 
 
-        const game::PatternArray patterns;
+        const game::PatternArray* const patterns;
         const uint16_t levelSeed;
         ::Random levelRandom { 0 };
         ::Random effectRandom { 1 };
@@ -2044,13 +2041,12 @@ namespace game {
         }
 
         game::Pattern getRandomPattern() {
-            unsigned int limit = patterns.getMark(min((unsigned int)layerNumber, patterns.markCount() - 1));
+            unsigned int limit = patterns->getMark(min((unsigned int)layerNumber, patterns->markCount() - 1));
             unsigned int index = levelRandom.nextUint16(limit);
-            return patterns.get(index);
+            return patterns->get(index);
         }
 
         void advancePattern() {
-
             if(patternPause > 0) patternPause--;
             while(true) {
                 while(pattern.tiles == NULL || patternProgress >= pattern.tileCount) {
@@ -2728,6 +2724,7 @@ namespace game {
 
 }
 
+// !!! CULPRIT !!!
 class IntroScene : public Scene {
 public:
     IntroScene() {
@@ -2762,7 +2759,7 @@ public:
         }
 
         if(timer <= 0) {
-            bool lineEnded;
+            bool lineEnded = false;
             if(*text != '\0') lineEnded = write(*text++);
 
             if(*text == '\0') {
@@ -2848,9 +2845,13 @@ public:
                 LOG_DELETE(nextScene);
                 delete nextScene;
             }
-            nextScene = new IntroScene();
+            /*nextScene = new IntroScene();
             LOG_NEW(nextScene);
-            if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Intro"));
+            if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Intro"));*/
+            // HACK
+            nextScene = new game::Game(game::globalSeed);
+            LOG_NEW(nextScene);
+            if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Game"));
         }
 
         for(byte i = 0; i < FIRE_COUNT; i++) {
@@ -2926,6 +2927,7 @@ void setup() {
     DEBUG_LOG_CAPTIONED(F("Frame length: "), MILLIS_PER_FRAME);
     nextFrameDue = millis() + MILLIS_PER_FRAME;
 
+    game::createDefaultPatterns(&game::defaultPatterns);
     switchToMainMenu();
 }
 
