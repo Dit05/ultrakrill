@@ -1,3 +1,4 @@
+#include <new>
 #ifndef LCD_EMULATOR
 #include <LiquidCrystal.h>
 #endif
@@ -53,10 +54,11 @@ bool lagging = false; // Időtúllépéses-e az előző frame.
 
 
 // Scenek
-void switchToMainMenu(); // Ezt forward declarelni kell, mert különben a scenek nem tudnak egymásra körbehivatkozni.
-class Scene;
-Scene* scene = NULL;
-Scene* nextScene = NULL;
+namespace game { struct Stats; }
+void switchToMenu();
+void switchToIntro();
+void switchToGame(uint16_t seed);
+void switchToSkull(game::Stats stats);
 
 
 // Debug
@@ -482,7 +484,7 @@ class Scene {
 
 public:
     virtual void setInputs(Buttons held, Buttons pressed, Buttons released) = 0;
-    virtual void process(Scene** changeScene) = 0;
+    virtual void process() = 0;
     virtual void draw(::LiquidCrystal* lcd_p) = 0;
     virtual void suspend() = 0;
     virtual void resume(::LiquidCrystal* lcd_p) = 0;
@@ -492,7 +494,7 @@ public:
 
 
 namespace text {
-    const char* INTRO[] {
+    /*const char* INTRO[] {
         "MACHINE ID:",
         " V1",
         "STATUS:",
@@ -501,6 +503,9 @@ namespace text {
         "MANKIND IS DEAD.",
         "BLOOD IS FUEL.",
         "HELL IS FULL."
+    };*/
+    const char* INTRO[] { // TODO make it fit into memory
+        "a",
     };
     const byte INTRO_LENGTH = sizeof(INTRO) / sizeof(const char*);
 }
@@ -982,7 +987,7 @@ namespace gfx {
             this->pressed = pressed;
         }
 
-        void process(Scene** changeScene) {
+        void process() {
             for(int i = 0; i < LCD_HEIGHT; i++) if(pressed.up && offset != 0) offset--;
             for(int i = 0; i < LCD_HEIGHT; i++) if(pressed.down && offset + LCD_HEIGHT < 256 / 8) offset++;
         }
@@ -1318,101 +1323,101 @@ namespace game {
         // E: imp/filth (véletlen)
         // kisbetű: opcionális
         patterns->add("     ",
-                     "ZWWWZ");
+                      "ZWWWZ");
 
         patterns->add("y",
-                     "z");
+                      "z");
         patterns->add("z",
-                     "y");
+                      "y");
         patterns->add("y",
-                     "y");
+                      "y");
 
         patterns->add(" ",
-                     "F");
+                      "F");
 
         patterns->add("I",
-                     " ");
+                      " ");
 
         patterns->mark(); // 0. (Limbo)
 
         patterns->add("I",
-                     " ");
+                      " ");
         patterns->add(" ",
-                     "E");
+                      "E");
 
         patterns->add(" x ",
-                     "Eee");
+                      "Eee");
 
         patterns->add("E",
-                     "Z");
+                      "Z");
 
         patterns->add("fff",
-                     "zzz");
+                      "zzz");
 
         patterns->mark(); // 1. (Lust)
 
         patterns->add("ZZZ",
-                     "ZZZ");
+                      "ZZZ");
         patterns->add("ff",
-                     "ff");
+                      "ff");
 
         patterns->mark(); // 2. (Gluttony)
 
         patterns->add("      IY",
-                     "ZWWWZ   ");
+                      "ZWWWZ   ");
         patterns->add("I",
-                     "W");
+                      "W");
 
         patterns->mark(); // 3. (Greed)
 
         patterns->add(" zez ",
-                     "zZFZz");
+                      "zZFZz");
         patterns->add(" Z ",
-                     "ZVZ");
+                      "ZVZ");
         patterns->add(" X ",
-                     "XXX");
+                      "XXX");
 
         patterns->mark(); // 4. (Wrath)
 
         patterns->add("   w   ",
-                     "w  y  w");
+                      "w  y  w");
         patterns->add("w  y  w",
-                     "   w   ");
+                      "   w   ");
         patterns->add("yzy",
-                     "www");
+                      "www");
         patterns->add(" e ",
-                     "WWW");
+                      "WWW");
         patterns->add("     ",
-                     "XZVZX");
+                      "XZVZX");
         patterns->add("XZZZX",
-                     "     ");
+                      "     ");
         patterns->add("     ZXXx",
-                     "xXXZ     ");
+                      "xXXZ     ");
         patterns->add("xXXZ     ",
-                     "     ZXXx");
+                      "     ZXXx");
 
         patterns->mark(); // 5. (Heresy)
 
         patterns->add("Z  f  Z",
-                     "ZWfffWZ");
+                      "ZWfffWZ");
         patterns->add("  iZ",
-                     "  iZ");
+                      "  iZ");
 
         patterns->mark(); // 6. (Violence)
 
         patterns->add(" fff ",
-                     "fFEFf");
+                      "fFEFf");
         patterns->add("X",
-                     "X");
+                      "X");
 
         patterns->mark(); // 7. (Fraud)
 
         patterns->add("yyzZzyy",
-                     "Ww w wW");
+                      "Ww w wW");
         patterns->add("yXXy",
-                     "yXXy");
+                      "yXXy");
         patterns->add("XeEe",
-                     "XeEe");
+                      "XeEe");
 
         patterns->mark(); // 8. (Treachery)
         DEBUG_LOG_CAPTIONED(F("Pattern tiles: "), patterns->tilesSize());
@@ -1542,12 +1547,12 @@ namespace game {
             buttonsReleased = released;
         }
 
-        void process(Scene** changeScene) {
+        void process() {
             animationTimer++;
             animationTimer %= ANIMATION_PERIOD;
 
             if(buttonsReleased.right) {
-                switchToMainMenu();
+                switchToMenu();
                 return;
             }
 
@@ -1725,16 +1730,14 @@ namespace game {
             initializeCustomChars(lcd_p);
         }
 
-        void process(Scene** changeScene) {
+        void process() {
             if(dieTimer > 0) {
                 dieTimer++;
                 if(dieTimer > 30) {
                     Serial.print(F("[Stats] "));
                     stats.printJson();
                     Serial.println();
-                    *changeScene = new ::game::SkullScene(stats);
-                    LOG_NEW(*changeScene);
-                    if(*changeScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("SkullScene"));
+                    switchToSkull(stats);
                 }
                 return;
             }
@@ -2712,19 +2715,9 @@ namespace game {
 
     uint16_t globalSeed = 0;
 
-    void startGame() {
-        if(nextScene != NULL) {
-            LOG_DELETE(nextScene);
-            delete nextScene;
-        }
-        nextScene = new game::Game(globalSeed);
-        LOG_NEW(nextScene);
-        if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Game"));
-    }
-
 }
 
-// !!! CULPRIT !!!
+// !!! CULPRIT !!! ?
 class IntroScene : public Scene {
 public:
     IntroScene() {
@@ -2737,13 +2730,13 @@ public:
         buttonsReleased = released;
     }
 
-    void process(Scene** changeScene) {
+    void process() {
         if(buttonsHeld.down) {
             timer = 0;
             pause = 0;
         }
         if(buttonsReleased.right) {
-            game::startGame();
+            switchToGame(game::globalSeed);
             return;
         }
 
@@ -2754,7 +2747,7 @@ public:
         }
 
         if(lineNumber > text::INTRO_LENGTH) {
-            game::startGame();
+            switchToGame(game::globalSeed);
             return;
         }
 
@@ -2839,19 +2832,9 @@ public:
         buttonsReleased = released;
     }
 
-    virtual void process(Scene** changeScene) {
+    virtual void process() {
         if(buttonsReleased.right) {
-            if(nextScene != NULL) {
-                LOG_DELETE(nextScene);
-                delete nextScene;
-            }
-            /*nextScene = new IntroScene();
-            LOG_NEW(nextScene);
-            if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Intro"));*/
-            // HACK
-            nextScene = new game::Game(game::globalSeed);
-            LOG_NEW(nextScene);
-            if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Game"));
+            switchToIntro();
         }
 
         for(byte i = 0; i < FIRE_COUNT; i++) {
@@ -2894,14 +2877,33 @@ private:
 };
 
 
-void switchToMainMenu() {
-    if(nextScene != NULL) {
-        LOG_DELETE(nextScene);
-        delete nextScene;
-    }
-    nextScene = new MenuScene();
-    LOG_NEW(nextScene);
-    if(nextScene == NULL) panic(PANIC_ALLOCATION_FAILED, F("Menu"));
+Scene* scene_p = NULL;
+Scene* nextScene_p = NULL;
+
+MenuScene menuScene {};
+game::Game gameScene { 0 };
+IntroScene introScene {};
+game::SkullScene skullScene { game::Stats() };
+
+
+void switchToMenu() {
+    menuScene.~MenuScene();
+    nextScene_p = new(&menuScene) MenuScene;
+}
+
+void switchToIntro() {
+    introScene.~IntroScene();
+    nextScene_p = new(&introScene) IntroScene;
+}
+
+void switchToGame(uint16_t seed) {
+    gameScene.~Game();
+    nextScene_p = new(&gameScene) game::Game(game::globalSeed);
+}
+
+void switchToSkull(game::Stats stats) {
+    skullScene.~SkullScene();
+    nextScene_p = new(&skullScene) game::SkullScene(stats);
 }
 
 
@@ -2924,11 +2926,12 @@ void setup() {
     pinMode(PIN_LCD_DB7, OUTPUT);
     DEBUG_LOG(F("Pin modes set"));
 
+    game::createDefaultPatterns(&game::defaultPatterns);
+    DEBUG_LOG_CAPTIONED(F("Patterns allocated"), MILLIS_PER_FRAME);
+    switchToMenu();
+
     DEBUG_LOG_CAPTIONED(F("Frame length: "), MILLIS_PER_FRAME);
     nextFrameDue = millis() + MILLIS_PER_FRAME;
-
-    game::createDefaultPatterns(&game::defaultPatterns);
-    switchToMainMenu();
 }
 
 
@@ -2939,20 +2942,18 @@ void loop() {
     game::globalSeed++;
 
     // Jelenetváltás
-    if(nextScene != NULL) {
-        if(scene != NULL) {
-            scene->suspend();
-            LOG_DELETE(scene);
-            delete scene;
+    if(nextScene_p != NULL) {
+        if(scene_p != NULL) {
+            scene_p->suspend();
         }
-        scene = nextScene;
-        nextScene = NULL;
+        scene_p = nextScene_p;
+        nextScene_p = NULL;
         lcd.clear();
-        scene->resume(&lcd);
+        scene_p->resume(&lcd);
     }
 
 
-    if(scene != NULL) {
+    if(scene_p != NULL) {
         // Bemenet
         Buttons heldNow {
             .up = (digitalRead(PIN_BUTTON_UP) == LOW),
@@ -2960,15 +2961,15 @@ void loop() {
             .right = (digitalRead(PIN_BUTTON_RIGHT) == LOW)
         };
 
-        scene->setInputs(heldNow, !lastHeldButtons && heldNow, lastHeldButtons && !heldNow);
+        scene_p->setInputs(heldNow, !lastHeldButtons && heldNow, lastHeldButtons && !heldNow);
 
         lastHeldButtons = heldNow;
 
 
-        scene->process(&nextScene);
+        scene_p->process();
         // Ha időhiányban szenvedünk, akkor átugorjuk a kirajzolást, mert ez jelentős időbe telik, és "nem hat" a játékmenetre.
         if(!lagging) {
-            scene->draw(&lcd);
+            scene_p->draw(&lcd);
         }
     }
 #ifdef LCD_EMULATOR
