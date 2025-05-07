@@ -339,7 +339,7 @@ public:
     }
 
 private:
-    const char* str_m;
+    const char* PROGMEM str_m;
 };
 
 
@@ -494,26 +494,14 @@ public:
 
 
 namespace text {
-    /*const char* INTRO[] {
-        "MACHINE ID:",
-        " V1",
-        "STATUS:",
-        "APPROACHING HELL",
-        "",
-        "MANKIND IS DEAD.",
-        "BLOOD IS FUEL.",
-        "HELL IS FULL."
-    };*/
-    const char* INTRO[] { // TODO make it fit into memory
-        "a",
-    };
-    const byte INTRO_LENGTH = sizeof(INTRO) / sizeof(const char*);
+    // CSAK ÍGY MŰKÖDIK A PROGMEM!! (végre rájöttem)
+    const char INTRO_F[] PROGMEM = {"MACHINE ID:\n V1\nSTATUS:\nAPPROACHING HELL\n\nMANKIND IS DEAD.\nBLOOD IS FUEL.\nHELL IS FULL.\n"};
 }
 
 
 namespace gfx {
 
-    const char* HEX_DIGITS = "0123456789ABCDEF";
+    const char* const HEX_DIGITS = "0123456789ABCDEF";
 
     constexpr const byte CHAR_FIRE = 0; // Procedural fire.
     constexpr const byte CHAR_PLAYER = 1; // Animated player character.
@@ -524,7 +512,7 @@ namespace gfx {
     constexpr const byte CHAR_IMP = 6; // Animated character for the flying-shooting enemy.
     constexpr const byte CHAR_OVERLAY = 7; // Character for full-screen overlay.
 
-    const char* const PROGMEM SHOOT_CHARGE_CHARS = " .,;|+*";
+    const char* const SHOOT_CHARGE_CHARS_F = " .,;|+*";
 
     const char* SMOKE = ",;x&@";
     const byte SMOKE_MAX = strlen(SMOKE) - 1;
@@ -1856,8 +1844,27 @@ namespace game {
             setCustomChars(lcd_p);
         }
 
-        void showBanner(String msg) {
-            banner = msg;
+
+        void bannerClear() {
+            memset(&banner, 0, BANNER_SIZE * sizeof(byte));
+            bannerLength = 0;
+        }
+
+        void bannerAppend(const char* text) {
+            while(*text != '\0' && bannerLength < BANNER_SIZE) banner[bannerLength++] = *text++;
+        }
+
+        void bannerAppend(StringWrapper* text) {
+            unsigned int i = 0;
+            while((*text)[i] != '\0' && bannerLength < BANNER_SIZE) banner[bannerLength++] = (*text)[i++];
+        }
+
+        void bannerAppend(byte n) {
+            // TODO multi-digit number support
+            if(bannerLength < BANNER_SIZE) banner[bannerLength++] = '0' + n;
+        }
+
+        void bannerStart() {
             bannerScroll = 0;
         }
 
@@ -1869,7 +1876,9 @@ namespace game {
 
         Stats stats {};
 
-        String banner {};
+        static const byte BANNER_SIZE = 20;
+        char banner[BANNER_SIZE];
+        byte bannerLength = 0;
         unsigned int bannerScroll = 0;
 
         // Ezt töltögetjük majd fel annyira, hogy az életerőt mutassa.
@@ -2029,11 +2038,13 @@ namespace game {
             layer_p = &LAYERS[num];
             layerStepsLeft = layer_p->length();
 
-            String msg(F("LAYER "));
-            msg += num + 1;
-            msg += F(": ");
-            msg += layer_p->name();
-            showBanner(msg);
+            auto text1 = FlashStringWrapper(F("LAYER "));
+            bannerAppend(&text1);
+            bannerAppend(num + 1);
+            auto text2 = FlashStringWrapper(F(": "));
+            bannerAppend(&text2);
+            bannerAppend(layer_p->name());
+            bannerStart();
 
             pattern = Pattern { 0, NULL };
             patternProgress = 0;
@@ -2200,20 +2211,19 @@ namespace game {
         void drawHud(::gfx::Frame* frame_p) {
 
             // Banner
-            if((frameNumber % 3 == 0) && banner.length() > 0) {
+            if((frameNumber % 3 == 0) && bannerLength > 0) {
                 int posX = LCD_WIDTH - 1 - bannerScroll;
                 unsigned int i = max(0, -posX);
                 byte x = max(0, posX);
-                while(x < LCD_WIDTH - 1 && i < banner.length()) {
+                while(x < LCD_WIDTH - 1 && i < bannerLength) {
                     *frame_p->index(x, 0) = banner[i];
                     i++;
                     x++;
                 }
 
                 if((frameNumber % 2) == 0) bannerScroll++;
-                if(bannerScroll >= banner.length() + LCD_WIDTH) {
-                    banner = String {};
-                    bannerScroll = 0;
+                if(bannerScroll >= (byte)(bannerLength + LCD_WIDTH)) {
+                    bannerClear();
                 }
             }
 
@@ -2230,10 +2240,10 @@ namespace game {
             char bottomCh = ' ';
             if(shootCharge > SHOOT_CHARGE_STEP_LENGTH) {
                 if(!shootFullyCharged() || frameNumber % 8 >= 4) {
-                    bottomCh = ::gfx::SHOOT_CHARGE_CHARS[shootCharge / SHOOT_CHARGE_STEP_LENGTH];
+                    bottomCh = ::gfx::SHOOT_CHARGE_CHARS_F[shootCharge / SHOOT_CHARGE_STEP_LENGTH];
                 }
             } else {
-                bottomCh = '0' + layerNumber;
+                bottomCh = '0' + (layerNumber + 1);
             }
             *frame_p->index(LCD_WIDTH - 1, LCD_HEIGHT - 1) = bottomCh;
         }
@@ -2241,7 +2251,7 @@ namespace game {
 
         byte playerX() const { return 0; }
         byte playerY() const { return playerUp ? 0 : 1; }
-        bool shootFullyCharged() const { return ::gfx::SHOOT_CHARGE_CHARS[shootCharge / SHOOT_CHARGE_STEP_LENGTH + 1] == '\0'; }
+        bool shootFullyCharged() const { return ::gfx::SHOOT_CHARGE_CHARS_F[shootCharge / SHOOT_CHARGE_STEP_LENGTH + 1] == '\0'; }
 
         void hitPlayer(byte unscaledDamage, bool grantIFrames) {
             if(playerIFrames > 0) return;
@@ -2717,7 +2727,6 @@ namespace game {
 
 }
 
-// !!! CULPRIT !!! ?
 class IntroScene : public Scene {
 public:
     IntroScene() {
@@ -2746,17 +2755,17 @@ public:
             return;
         }
 
-        if(lineNumber > text::INTRO_LENGTH) {
+        if(text[textIndex] == '\0') {
             switchToGame(game::globalSeed);
             return;
         }
 
         if(timer <= 0) {
             bool lineEnded = false;
-            if(*text != '\0') lineEnded = write(*text++);
+            if(text[textIndex] != '\n') lineEnded = write(text[textIndex++]);
 
-            if(*text == '\0') {
-                text = ::text::INTRO[lineNumber++];
+            if(text[textIndex] == '\n') {
+                textIndex++;
 
                 pause = 20;
                 if(!lineEnded) crlf();
@@ -2782,9 +2791,8 @@ private:
     Buttons buttonsReleased = {};
     gfx::Frame frame {};
 
-    const char* text = "\0";
-
-    byte lineNumber = 0;
+    FlashStringWrapper text = FlashStringWrapper(::text::INTRO_F);
+    unsigned int textIndex = 0;
 
     byte timer = 0;
     byte cursorX = 0;
