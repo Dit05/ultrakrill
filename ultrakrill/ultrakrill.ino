@@ -99,6 +99,11 @@ DEBUG_PRINTLN(val);
 
 #else //
 
+#define LOG_NEW(what)
+#define LOG_NEWS(what)
+#define LOG_DELETE(what)
+#define LOG_DELETES(what)
+
 #endif
 
 
@@ -2828,7 +2833,7 @@ class MenuScene : public Scene {
 public:
 
     MenuScene() {
-        Random rand { 1 };
+        Random rand { 149 };
         for(byte i = 0; i < FIRE_COUNT; i++) {
             fires[i].randomizeMasks(&rand);
         }
@@ -2907,6 +2912,8 @@ void switchToIntro() {
 void switchToGame(uint16_t seed) {
     gameScene.~Game();
     nextScene_p = new(&gameScene) game::Game(game::globalSeed);
+    Serial.print("[Seed] ");
+    Serial.println(game::globalSeed);
 }
 
 void switchToSkull(game::Stats stats) {
