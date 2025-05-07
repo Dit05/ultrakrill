@@ -2298,9 +2298,11 @@ namespace game {
             // TODO ground slam?
             // Ugrálás
             if(playerUp) {
-                playerUp = buttonsHeld.up || (*obstacleMap.index(playerX(), 1) != OBSTACLE_EMPTY);
+                ObstacleKind there = (ObstacleKind)*obstacleMap.index(playerX(), 1);
+                playerUp = buttonsHeld.up || (there != OBSTACLE_EMPTY && there != OBSTACLE_FIRE);
             } else {
-                playerUp = buttonsHeld.up && (*obstacleMap.index(playerX(), 0) == OBSTACLE_EMPTY);
+                ObstacleKind there = (ObstacleKind)*obstacleMap.index(playerX(), 0);
+                playerUp = buttonsHeld.up && (there == OBSTACLE_EMPTY || there == OBSTACLE_FIRE);
             }
 
             if(buttonsHeld.up) {
@@ -2942,7 +2944,7 @@ void setup() {
     DEBUG_LOG(F("Pin modes set"));
 
     game::createDefaultPatterns(&game::defaultPatterns);
-    DEBUG_LOG_CAPTIONED(F("Patterns allocated"), MILLIS_PER_FRAME);
+    DEBUG_LOG(F("Patterns allocated"));
     switchToMenu();
 
     DEBUG_LOG_CAPTIONED(F("Frame length: "), MILLIS_PER_FRAME);
