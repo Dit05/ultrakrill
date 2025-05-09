@@ -5,11 +5,12 @@ Simple sidescrolling game running on an Arduino UNO with a character LCD inspire
 You automatically move to the right, and must avoid obstacles and enemies to survive as long as possible. Your health slowly drains over time, and must be restored by consuming blood. There are 9 layers, each of which has you moving faster and encountering more patterns than the previous.
 
 ### Level elements
-- Blocks a limited number of shots and damages you when ran into.
-- Looks cool but its only purpose is to damage you.
-- One of the two kinds of enemies. Doesn't do much, but is a good source of blood.
-- The other kind of enemy. Occasionally shoots balls of Hell Energy at you.
-- Press *fire* in the main menu to start playing. The intro can be fast-forwarded with *down*, or skipped entirely with *fire*.
+- **Wall**: Blocks a limited number of shots and damages you when ran into.
+- **Fire**: Looks cool but its only purpose is to damage you.
+- **Filth**: One of the two kinds of enemies. Doesn't do much, but is a good source of blood.
+- **Imp**: The other kind of enemy. Occasionally shoots balls of Hell Energy at you.
+
+Press *fire* in the main menu to start playing. The intro can be fast-forwarded with *down*, or skipped entirely with *fire*.
 
 ### Controls
 Use *up* to jump, and *down* to slide.
@@ -19,6 +20,7 @@ Tapping *fire* while an enemy projectile is right in front of you parries it and
 You can press *down* and *up* to view statistics on the death screen. These are also sent over serial encoded as JSON upon death.
 
 ## Gameplay tips
+- Your health cannot run out completely over time, only from damage.
 - Jumping quickly after ending a slide lets you fly through the air quickly.
 - Explosive shots spill more blood.
 - Imps contain more blood than filths, making up for their increased health.
@@ -32,7 +34,7 @@ Parts:
 - Potentiometer for adjusting LCD contrast (optional but highly recommended)
 - 3 buttons
 
-The pins for everything are near the top of the source code. Buttons should be pulled HIGH. The LCD's RW pin is not used, so it should be tied LOW.
+The pins for everything are near the top of the source code. Buttons are used as INPUT\_PULLUP, so pull resistors are not needed. The LCD's RW pin is not used, so it should be tied LOW.
 
 ## Compiling
 The `ultrakrill` directory is an Arduino sketch, which can be compiled and uploaded via arduino-cli or a similar tool.

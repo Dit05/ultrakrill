@@ -20,6 +20,7 @@ Amikor egy ellenséges lövés épp előtted van, akkor a *tűz*-zel kiparryzhet
 A játék vége képernyőn a *le* és *fel* segítségével megnézheted a statisztikáid. Ezeket elküldődnek serial-on keresztül is JSON-ként meghaláskor.
 
 ## Játékmenet tippek
+- Az életerőd nem tud teljesen elfogyni magától, csak sebzéstől.
 - Ha ugrasz rögtön egy csúszás után, akkor gyorsan tudsz a levegőben haladni.
 - A robbanós lövések több vért ontanak.
 - Az ördögök több vért tartalmaznak a piszkoknál, de magasabb életerejük is van.
@@ -33,7 +34,7 @@ Hozzávalók:
 - Potméter az LCD kontraszt állítgatására (opcionális, de erősen ajánlott)
 - 3 gomb
 
-A pinek a forráskód teteje táján találhatók. A gombok INPUT_PULLUPként vannak használva, tehát nem kellenek pull-up ellenállások. Az LCD RW pinje nem használt, tehát ez a földhöz kötendő.
+A pinek a forráskód teteje táján találhatók. A gombok INPUT\_PULLUPként vannak használva, tehát nem kellenek pull-up ellenállások. Az LCD RW pinje nem használt, tehát ez a földhöz kötendő.
 
 ## Kompilálás
 Az `ultrakill` mappa egy Arduino sketch, amely kompilálható és feltölthető az arduino-cli vagy egy hasonló eszköz segítségével.
