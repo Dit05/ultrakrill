@@ -1,4 +1,4 @@
-# ultrakrill
+# Ultrakrill
 Simple sidescrolling game running on an Arduino UNO with a character LCD inspired by [ULTRAKILL](https://en.wikipedia.org/wiki/Ultrakill).
 
 ## Gameplay
